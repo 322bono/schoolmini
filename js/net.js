@@ -1,0 +1,166 @@
+// Firebase RTDB 통신 레이어 (익명 인증 + 방 관리)
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {
+  getAuth, signInAnonymously, onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {
+  getDatabase, ref, get, set, update, remove, onValue, onDisconnect,
+  runTransaction, serverTimestamp, query, orderByChild, endAt, limitToFirst
+} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
+import { firebaseConfig, MAX_PLAYERS, ROOM_TTL_MS } from "./config.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getDatabase(app);
+
+let _uid = null;
+let _offset = 0;
+
+// 탭 식별자 — 같은 브라우저(같은 익명 UID)에서 탭을 여러 개 열면
+// 마지막에 입장한 탭만 유효하고 나머지는 스스로 물러난다 (유령 방장 방지)
+export const TAB_ID = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+
+onValue(ref(db, ".info/serverTimeOffset"), s => { _offset = s.val() || 0; });
+
+/** 익명 로그인 완료 후 uid 반환 */
+export function ready() {
+  return new Promise((resolve, reject) => {
+    onAuthStateChanged(auth, user => {
+      if (user) { _uid = user.uid; resolve(_uid); }
+    });
+    signInAnonymously(auth).catch(reject);
+  });
+}
+
+export const uid = () => _uid;
+/** 서버 기준 현재 시각(ms) */
+export const now = () => Date.now() + _offset;
+export const ts = serverTimestamp;
+
+// ── 저수준 헬퍼 ──────────────────────────────
+const r = path => ref(db, path);
+export const dbSet = (path, val) => set(r(path), val);
+export const dbUpdate = (path, obj) => update(r(path), obj);
+export const dbRemove = path => remove(r(path));
+export const dbGet = async path => (await get(r(path))).val();
+export const dbTxn = (path, fn) => runTransaction(r(path), fn);
+export function dbWatch(path, cb) {
+  return onValue(r(path), snap => cb(snap.val()));
+}
+export function presence(path) {
+  // 접속 끊기면 online=false
+  onDisconnect(r(path + "/online")).set(false);
+}
+export function cancelPresence(path) {
+  onDisconnect(r(path + "/online")).cancel().catch(() => {});
+}
+
+// ── 방 관리 ─────────────────────────────────
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 헷갈리는 글자 제외
+
+function genCode() {
+  let c = "";
+  for (let i = 0; i < 4; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return c;
+}
+
+/** 6시간 지난 방 최대 5개 청소 (실패해도 무시) */
+async function cleanupOldRooms() {
+  try {
+    const q = query(r("rooms"), orderByChild("meta/createdAt"), endAt(now() - ROOM_TTL_MS), limitToFirst(5));
+    const snap = await get(q);
+    const val = snap.val();
+    if (!val) return;
+    await Promise.all(Object.keys(val).map(code => remove(r("rooms/" + code)).catch(() => {})));
+  } catch { /* 인덱스/권한 문제 시 조용히 무시 */ }
+}
+
+export async function createRoom(nick) {
+  cleanupOldRooms();
+  let code = null;
+  for (let i = 0; i < 6; i++) {
+    const c = genCode();
+    if (!(await dbGet(`rooms/${c}/meta`))) { code = c; break; }
+  }
+  if (!code) throw new Error("방 코드를 만들지 못했어. 다시 시도해줘!");
+  await dbSet(`rooms/${code}`, {
+    meta: {
+      createdAt: serverTimestamp(),
+      hostUid: _uid,
+      status: "lobby",
+      rounds: 4,
+      curRound: 0,
+      phase: null
+    },
+    players: {
+      [_uid]: { nick, color: 0, score: 0, online: true, joined: serverTimestamp(), tab: TAB_ID }
+    },
+    colors: { 0: _uid }
+  });
+  presence(`rooms/${code}/players/${_uid}`);
+  return code;
+}
+
+export async function joinRoom(code, nick) {
+  code = code.toUpperCase().trim();
+  const meta = await dbGet(`rooms/${code}/meta`);
+  if (!meta) throw new Error("그런 방 코드는 없어! 다시 확인해줘 🙈");
+
+  const me = await dbGet(`rooms/${code}/players/${_uid}`);
+  if (me) {
+    // 재접속 (새로고침 등) — 점수 유지, 이 탭이 최신 탭이 됨
+    await dbUpdate(`rooms/${code}/players/${_uid}`, { online: true, nick: nick || me.nick, tab: TAB_ID });
+    presence(`rooms/${code}/players/${_uid}`);
+    return { code, rejoin: true };
+  }
+
+  if (meta.status !== "lobby") throw new Error("이미 게임이 시작된 방이야! 끝날 때까지 기다려줘");
+
+  const res = await dbTxn(`rooms/${code}/players`, players => {
+    if (players && Object.keys(players).length >= MAX_PLAYERS) return; // abort
+    players = players || {};
+    players[_uid] = { nick, color: -1, score: 0, online: true, joined: Date.now(), tab: TAB_ID };
+    return players;
+  });
+  if (!res.committed) throw new Error(`방이 꽉 찼어! (최대 ${MAX_PLAYERS}명)`);
+
+  presence(`rooms/${code}/players/${_uid}`);
+  await claimFirstFreeColor(code);
+  return { code, rejoin: false };
+}
+
+export async function claimFirstFreeColor(code) {
+  for (let i = 0; i < 20; i++) {
+    if (await claimColor(code, i)) return i;
+  }
+  return -1;
+}
+
+/** 색 선택 (중복 불가, 트랜잭션). 성공 시 true */
+export async function claimColor(code, idx) {
+  const res = await dbTxn(`rooms/${code}/colors/${idx}`, cur => {
+    if (cur === null || cur === _uid) return _uid;
+    return; // 이미 다른 사람 것 → abort
+  });
+  if (!res.committed) return false;
+  const old = await dbGet(`rooms/${code}/players/${_uid}/color`);
+  const updates = { [`players/${_uid}/color`]: idx };
+  if (old !== null && old !== undefined && old >= 0 && old !== idx) {
+    updates[`colors/${old}`] = null;
+  }
+  await dbUpdate(`rooms/${code}`, updates);
+  return true;
+}
+
+export async function leaveRoom(code, isHost, myColor, status) {
+  cancelPresence(`rooms/${code}/players/${_uid}`);
+  try {
+    if (isHost && status === "lobby") {
+      await dbRemove(`rooms/${code}`); // 로비에서 방장이 나가면 방 해산
+    } else {
+      const updates = { [`players/${_uid}`]: null };
+      if (myColor >= 0) updates[`colors/${myColor}`] = null;
+      await dbUpdate(`rooms/${code}`, updates);
+    }
+  } catch { /* noop */ }
+}
