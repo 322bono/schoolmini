@@ -130,7 +130,7 @@ async function submitEntry() {
       const code = await net.createRoom(nick);
       enterRoom(code);
     } else {
-      const code = $("inpCode").value.trim().toUpperCase();
+      const code = net.normalizeCode($("inpCode").value);
       if (code.length !== 4) { toast("방 코드는 4글자야!", true); btn.disabled = false; return; }
       await net.joinRoom(code, nick);
       enterRoom(code);

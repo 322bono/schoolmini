@@ -56,7 +56,9 @@ export function cancelPresence(path) {
 }
 
 // ── 방 관리 ─────────────────────────────────
-const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 헷갈리는 글자 제외
+// 손글씨 폰트에서 모양이 겹치는 글자·숫자 쌍(S↔5, Z↔2, B↔8, G↔6, O↔0, I/L↔1,
+// Q↔O, U↔V)과 발음이 비슷한 N(↔M)을 전부 빼고, 헷갈릴 수 없는 글자만 사용
+const CODE_CHARS = "ACDEFHJKMPRTUWXY";
 
 function genCode() {
   let c = "";
@@ -101,10 +103,18 @@ export async function createRoom(nick) {
   return code;
 }
 
+/** 입력한 방 코드 정리: 전각 문자→반각, 공백 제거, 대문자화 */
+export function normalizeCode(raw) {
+  return (raw || "")
+    .replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+
 export async function joinRoom(code, nick) {
-  code = code.toUpperCase().trim();
+  code = normalizeCode(code);
   const meta = await dbGet(`rooms/${code}/meta`);
-  if (!meta) throw new Error("그런 방 코드는 없어! 다시 확인해줘 🙈");
+  if (!meta) throw new Error("그런 방 코드는 없어! 한 글자씩 다시 확인해줘 🙈");
 
   const me = await dbGet(`rooms/${code}/players/${_uid}`);
   if (me) {
