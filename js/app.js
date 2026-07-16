@@ -478,18 +478,20 @@ function playEmote(pid, k) {
       if (wander[pid]) setMotion(el, "idle");
     }, 1650);
   } else if (k === 4) {
-    // FAHHHH — 효과음 + 대기실 진동
-    w.emoteUntil = t + 800;
+    // FAHHHH — 진동·캐릭터 반응을 소리가 실제로 시작되는 순간에 맞춰 시작 (싱크)
+    w.emoteUntil = t + 1400;
     w.moving = false;
-    setFace(el, "shock");
-    setMotion(el, "shout");
-    playFahh();
-    const pg = $("playground");
-    pg.classList.remove("quake");
-    void pg.offsetWidth;
-    pg.classList.add("quake");
-    setTimeout(() => pg.classList.remove("quake"), 700);
-    setTimeout(() => { if (wander[pid]) { setFace(el, "normal"); setMotion(el, "idle"); } }, 900);
+    playFahh(() => {
+      if (!wander[pid]) return;
+      setFace(el, "shock");
+      setMotion(el, "shout");
+      const pg = $("playground");
+      pg.classList.remove("quake");
+      void pg.offsetWidth;
+      pg.classList.add("quake");
+      setTimeout(() => pg.classList.remove("quake"), 700);
+      setTimeout(() => { if (wander[pid]) { setFace(el, "normal"); setMotion(el, "idle"); } }, 900);
+    });
   }
 }
 

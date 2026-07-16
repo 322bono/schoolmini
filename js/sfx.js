@@ -17,6 +17,7 @@ function ac() {
 // 첫 사용자 입력에서 오디오 잠금 해제 (모바일 필수)
 export function unlockAudio() {
   try { ac(); } catch { /* 오디오 미지원 환경 */ }
+  preloadFahh(); // FAHH 미리 디코딩 — 첫 사용 때도 즉시 재생되게
   syncBgm(); // 제스처 이후 BGM 재생 재시도
 }
 
@@ -63,14 +64,60 @@ export function playDrumroll() {
   } catch { /* noop */ }
 }
 
-/** FAHHHH (로비 감정표현 4번) */
-export function playFahh() {
-  if (muted) return;
+// ── FAHHHH (로비 감정표현 4번) ─────────────────
+// HTMLAudio는 로드/시동 지연 때문에 진동 연출과 싱크가 어긋난다.
+// Web Audio 버퍼로 미리 디코딩해 두고, 파일 앞의 무음 구간도 건너뛰어
+// start() 순간 = 실제 소리 시작이 되게 한다.
+let fahhBuf = null;
+let fahhOffset = 0;
+let fahhLoading = null;
+
+export function preloadFahh() {
+  if (fahhBuf || fahhLoading) return fahhLoading;
   try {
-    const a = new Audio("assets/fahh.mp3");
-    a.volume = 0.8;
-    a.play().catch(() => {});
-  } catch { /* noop */ }
+    const c = ac();
+    fahhLoading = fetch("assets/fahh.mp3")
+      .then(r => r.arrayBuffer())
+      .then(ab => c.decodeAudioData(ab))
+      .then(buf => {
+        // 앞부분 무음 스킵 지점 찾기
+        const d = buf.getChannelData(0);
+        let i = 0;
+        while (i < d.length && Math.abs(d[i]) < 0.02) i++;
+        fahhOffset = Math.max(0, i / buf.sampleRate - 0.005);
+        fahhBuf = buf;
+        return buf;
+      })
+      .catch(() => { fahhLoading = null; });
+    return fahhLoading;
+  } catch { return null; }
+}
+
+/**
+ * FAHHHH 재생. onStart는 소리가 "실제로 시작되는 순간" 호출된다
+ * (진동 연출 싱크용 — 음소거 상태여도 호출됨)
+ */
+export function playFahh(onStart) {
+  const fire = () => { if (onStart) { onStart(); onStart = null; } };
+  try {
+    const c = ac();
+    const go = () => {
+      if (!fahhBuf) { fire(); return; }
+      const src = c.createBufferSource();
+      src.buffer = fahhBuf;
+      const g = c.createGain();
+      g.gain.value = 0.9;
+      src.connect(g).connect(master); // master가 음소거 게인 처리
+      src.start(0, fahhOffset);
+      fire();
+    };
+    if (fahhBuf) go();
+    else {
+      const p = preloadFahh();
+      if (p) p.then(go, fire);
+      else fire();
+    }
+  } catch { fire(); }
 }
 
 function osc({ type = "sine", freq = 440, to = null, dur = 0.15, vol = 0.5, delay = 0, curve = "exp" }) {
