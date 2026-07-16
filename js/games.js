@@ -153,16 +153,16 @@ function gameLoop(fn) {
 const nunchi = {
   id: "nunchi",
   name: "눈치게임",
-  tag: "1분 내에 눈치를 발휘해라!",
-  desc: "아무도 안 누를 때 <b>혼자</b> [외치기!]를 눌러야 성공!<br>누군가와 동시에(0.9초 안에) 누르면 같이 누른 사람 전부 탈락.<br>끝까지 안 누르고 버텨도 탈락이야! 👀",
-  WINDOW: 900,
+  tag: "10초 안에 눈치를 발휘해라!",
+  desc: "아무도 안 누를 때 <b>혼자</b> [외치기!]를 눌러야 성공!<br>누군가와 동시에(0.5초 안에) 누르면 같이 누른 사람 전부 탈락.<br>누가 언제 눌렀는지는 결과에서 공개! 끝까지 안 누르면 탈락이야! 👀",
+  WINDOW: 500,
 
-  duration: () => 60000,
+  duration: () => 10000,
   hostSetup: () => ({ on: true }),
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { shown: new Set(), pressed: false, timers: [] };
+    const c = this._c = { pressed: false, timers: [] };
     const status = document.createElement("div");
     status.className = "nunchi-status";
     status.innerHTML = "다들 눈치를 보는 중… <b>혼자</b>일 때 외쳐!";
@@ -182,20 +182,8 @@ const nunchi = {
     });
   },
   onState() {},
-  onInputs(inputs, ctx) {
-    const c = this._c;
-    if (!c || !inputs) return;
-    for (const pid of Object.keys(inputs)) {
-      if (c.shown.has(pid)) continue;
-      c.shown.add(pid);
-      const el = c.map[pid];
-      if (!el) continue;
-      setMotion(el, "shout");
-      charSay(el, "얍!!", 1500);
-      sfx.pop();
-      c.timers.push(setTimeout(() => setMotion(el, "idle"), 700));
-    }
-  },
+  // 다른 사람이 언제 눌렀는지는 결과 전까지 비밀 — 실시간 표시 없음
+  onInputs() {},
   hostEarlyEnd(ctx, inputs) {
     const n = Object.keys(ctx.players()).length;
     if (inputs && Object.keys(inputs).length >= n) return 2200;
@@ -230,7 +218,8 @@ const nunchi = {
 // ═════════════════════════════════════════════
 // 2. 무궁화 꽃이 피었습니다
 // ═════════════════════════════════════════════
-const SYL = ["무", "궁", "화", "꽃", "이", "피", "었", "습", "니", "다"];
+// 술래는 단어 하나씩 3번에 나눠서 글자를 맞춘다: 무궁화 → 꽃이 → 피었습니다
+const MG_WORDS = [["무", "궁", "화"], ["꽃", "이"], ["피", "었", "습", "니", "다"]];
 const SENTENCE = "무궁화 꽃이 피었습니다";
 const ROULETTE_MS = 4200;
 
@@ -244,7 +233,7 @@ const mugunghwa = {
   id: "mugunghwa",
   name: "무궁화 꽃이 피었습니다",
   tag: "1분 안에 탈출해!",
-  desc: "술래가 글자를 외치는 동안 [전진!]을 꾹 눌러 달려!<br>술래가 돌아보는 순간 움직이면 잡힌다!! 🚨<br>빨간 선을 넘으면 성공! 술래는 글자를 순서대로 빨리 눌러!",
+  desc: "술래가 글자를 외치는 동안 [전진!]을 꾹 눌러 달려!<br>술래가 돌아보는 순간 움직이면 잡힌다!! 🚨<br>빨간 선을 넘으면 성공! 술래는 <b>무궁화→꽃이→피었습니다</b> 순서로 글자를 맞춰!",
 
   duration: () => ROULETTE_MS + 60000,
   hostSetup(ctx) {
@@ -266,7 +255,7 @@ const mugunghwa = {
     const c = this._c = {
       timers: [], raf: 0, myX: 0, moving: false, caught: false, fin: false,
       lastWrite: 0, tagger: null, layoutDone: false, runnerEls: {}, laneOf: {},
-      cycle: null, cycleTimers: [], order: [], progress: 0, rouletteDone: false,
+      cycle: null, cycleTimers: [], order: [], progress: 0, wordIdx: 0, rouletteDone: false,
       lastTick: 0
     };
 
@@ -282,7 +271,7 @@ const mugunghwa = {
         <div class="dk-title">당신은 <b style="color:var(--hl)">술래</b>! 글자를 순서대로 눌러!</div>
         <div class="dk-progress" id="dkProgress"></div>
         <div class="mg-chips" id="mgChips"></div>
-        <div class="dk-timer" id="dkHint">순서대로 글자를 눌러서 완성해!</div>
+        <div class="dk-timer" id="dkHint">단어 하나씩! 순서대로 글자를 눌러서 완성해!</div>
       </div>`;
     c.field = stage.querySelector("#mgField");
     c.statusEl = stage.querySelector("#mgStatus");
@@ -389,7 +378,7 @@ const mugunghwa = {
         c.btn.textContent = "잡혔다… 😵";
         return;
       }
-      c.myX = Math.min(100, c.myX + dt * 10.5);
+      c.myX = Math.min(100, c.myX + dt * 8);
       const el = c.runnerEls[ctx.uid];
       if (el) {
         el.style.left = (8 + c.myX * 0.72) + "%";
@@ -467,14 +456,15 @@ const mugunghwa = {
     c.statusEl.className = "mg-status sketch " + (cls || "");
   },
 
-  // ── 술래 전용: 글자 사이클 관리 ──
+  // ── 술래 전용: 글자 사이클 관리 (단어 하나씩 3번) ──
   _taggerStartDark(ctx) {
     const c = this._c;
     if (!c) return;
     const remain = ctx.playEnd - ctx.now();
     if (remain < 2600) return;
-    c.order = shuffle(SYL.map((s, i) => i));
+    c.wordIdx = 0;
     c.progress = 0;
+    c.order = shuffle(MG_WORDS[0].map((s, i) => i));
     const id = Math.random().toString(36).slice(2, 7);
     c.cycleId = id;
     ctx.writeState({ cycle: { mode: "dark", start: ctx.now(), end: 0, id } });
@@ -501,14 +491,19 @@ const mugunghwa = {
       hint.textContent = "5초 뒤에 다시 도전…";
       return;
     }
-    // dark: 진행 상태 + 셔플 칩
-    hint.textContent = "순서대로 글자를 눌러서 완성해!";
+    // dark: 진행 상태 + 현재 단어의 셔플 칩
+    hint.textContent = "단어 하나씩! 순서대로 글자를 눌러서 완성해!";
     this._renderProgress();
+    this._renderChips(ctx);
+  },
+
+  _renderChips(ctx) {
+    const c = this._c;
     c.chipsEl.innerHTML = "";
     for (const si of c.order) {
       const b = document.createElement("button");
       b.className = "mg-chip";
-      b.textContent = SYL[si];
+      b.textContent = MG_WORDS[c.wordIdx][si];
       b.addEventListener("click", () => this._chipClick(ctx, si, b));
       c.chipsEl.appendChild(b);
     }
@@ -516,11 +511,14 @@ const mugunghwa = {
 
   _renderProgress() {
     const c = this._c;
+    // 완성한 단어들 + 현재 단어에서 맞춘 글자 수 = 전체 진행도
+    let done = c.progress;
+    for (let w = 0; w < c.wordIdx; w++) done += MG_WORDS[w].length;
     let html = "";
     let k = 0;
     for (const ch of SENTENCE) {
       if (ch === " ") { html += "&nbsp;"; continue; }
-      html += `<span class="${k < c.progress ? "done-syl" : "todo-syl"}">${ch}</span>`;
+      html += `<span class="${k < done ? "done-syl" : "todo-syl"}">${ch}</span>`;
       k++;
     }
     c.dkProgress.innerHTML = html;
@@ -534,7 +532,17 @@ const mugunghwa = {
       btnEl.disabled = true;
       sfx.correct();
       this._renderProgress();
-      if (c.progress >= SYL.length) {
+      if (c.progress >= MG_WORDS[c.wordIdx].length) {
+        if (c.wordIdx < MG_WORDS.length - 1) {
+          // 다음 단어로 — 칩을 새로 섞어서 배치
+          c.wordIdx++;
+          c.progress = 0;
+          c.order = shuffle(MG_WORDS[c.wordIdx].map((s, i) => i));
+          sfx.pop();
+          this._renderProgress();
+          this._renderChips(ctx);
+          return;
+        }
         const id = c.cycleId;
         c.cycleId = null;
         ctx.writeState({ cycle: { mode: "look", start: ctx.now(), end: ctx.now() + 1600, id } });
@@ -545,6 +553,7 @@ const mugunghwa = {
       sfx.wrong();
       const id = c.cycleId;
       c.cycleId = null;
+      c.wordIdx = 0;
       c.progress = 0;
       ctx.writeState({ cycle: { mode: "fever", start: ctx.now(), end: ctx.now() + 3000, id } });
       c.cycleTimers.push(setTimeout(() => this._taggerStartDark(ctx), 3050));
@@ -901,8 +910,8 @@ const choseki = {
 const WHACK_START = 3500;
 const WHACK_DUR = 30000;
 
-/** 시드로 두더지 스케줄 생성 — 모든 플레이어가 같은 두더지를 본다 */
-function genMoles(seed) {
+/** 시드로 두더지 스케줄 생성 — 모든 플레이어가 같은 두더지를 본다 (봇 구동용으로 export) */
+export function genMoles(seed) {
   const rng = mulberry32(seed);
   const events = [];
   const holeBusy = [0, 0, 0, 0, 0, 0];
@@ -926,11 +935,27 @@ function genMoles(seed) {
 
 const WHACK_PTS = { normal: 1, gold: 3, bomb: -2 };
 
+/** 두더지 점수 집계: claims(선착순 클레임)에서 플레이어별 합산 */
+function whackScores(ctx, state) {
+  const claims = (ctx.game().claims) || {};
+  const events = state && state.seed !== undefined ? genMoles(state.seed) : [];
+  const byIdx = {};
+  for (const ev of events) byIdx[ev.i] = ev;
+  const score = {};
+  for (const pid of Object.keys(ctx.players())) score[pid] = 0;
+  for (const [i, cl] of Object.entries(claims)) {
+    if (!cl || score[cl.u] === undefined) continue;
+    const ev = byIdx[i];
+    if (ev) score[cl.u] += WHACK_PTS[ev.type];
+  }
+  return score;
+}
+
 const whack = {
   id: "whack",
   name: "두더지 잡기!",
-  tag: "두더지를 최대한 많이 잡아라!",
-  desc: "구멍에서 튀어나오는 두더지를 빠르게 탭! 🔨<br>일반 두더지 <b>+1</b> · 반짝이는 황금 두더지 <b>+3</b> (금방 숨어!) · 폭탄 두더지 <b>-2</b> (누르면 안 돼!)<br>점수가 높은 상위 30%가 승리!",
+  tag: "제일 빨리 잡는 사람이 임자!",
+  desc: "모두가 <b>같은 두더지</b>를 봐! 제일 빨리 탭한 <b>한 명만</b> 점수를 가져가 🔨<br>일반 <b>+1</b> · 황금 <b>+3</b> (금방 숨어!) · 폭탄은 누른 사람만 <b>-2</b>!<br>점수가 높은 상위 30%가 승리!",
 
   stampOnTimeout: false, // 타이머 종료가 정상 종료인 게임
   duration: () => WHACK_START + WHACK_DUR + 2500,
@@ -940,7 +965,7 @@ const whack = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { score: 0, lastCount: -1, started: false, lastWrite: 0, moleEls: {}, hitSet: new Set() };
+    const c = this._c = { lastCount: -1, started: false, moleEls: {}, claimShown: {}, myScore: 0 };
     stage.innerHTML = `
       <div class="wa-top">
         <span class="sketch hud-chip">내 점수: <b id="waScore">0</b>점</span>
@@ -949,7 +974,7 @@ const whack = {
       <div class="wa-board" id="waBoard">
         ${[0, 1, 2, 3, 4, 5].map(i => `<div class="wa-hole" data-hole="${i}"><div class="wa-dirt"></div></div>`).join("")}
       </div>`;
-    dock.innerHTML = `<div class="game-note">🔨 두더지가 나오면 바로 탭! (폭탄은 누르지 마!)</div>`;
+    dock.innerHTML = `<div class="game-note">🔨 다른 친구보다 빨리 탭해야 점수! (폭탄은 누르지 마!)</div>`;
     c.scoreEl = stage.querySelector("#waScore");
     c.countEl = stage.querySelector("#waCount");
     c.holes = [...stage.querySelectorAll(".wa-hole")];
@@ -970,12 +995,37 @@ const whack = {
     }
     if (!c.started) { c.started = true; c.countEl.textContent = "잡아라!!"; sfx.go(); setTimeout(() => { if (c.countEl) c.countEl.textContent = ""; }, 900); }
     const e = t - state.startAt;
+    const claims = (ctx.game().claims) || {};
     for (const ev of c.events) {
-      const active = e >= ev.at && e < ev.at + ev.ttl && !c.hitSet.has(ev.i);
       const el = c.moleEls[ev.i];
+      const cl = claims[ev.i];
+      // 누군가 잡은 두더지: 모두의 화면에서 획득 연출 후 제거
+      if (cl && !c.claimShown[ev.i]) {
+        c.claimShown[ev.i] = true;
+        if (el) this._showClaim(ctx, ev, el, cl);
+        continue;
+      }
+      const active = e >= ev.at && e < ev.at + ev.ttl && !cl;
       if (active && !el) this._spawnMole(ctx, ev);
-      else if (!active && el) { el.remove(); delete c.moleEls[ev.i]; }
+      else if (!active && el && !c.claimShown[ev.i]) { el.remove(); delete c.moleEls[ev.i]; }
     }
+    // 내 점수 = 내가 클레임한 두더지들의 합
+    const myScore = whackScores(ctx, state)[ctx.uid] || 0;
+    if (myScore !== c.myScore) { c.myScore = myScore; c.scoreEl.textContent = myScore; }
+  },
+
+  _showClaim(ctx, ev, el, cl) {
+    const c = this._c;
+    const mine = cl.u === ctx.uid;
+    const p = ctx.players()[cl.u];
+    if (ev.type === "bomb") { if (mine) { sfx.buzz(); vibrate(180); } el.classList.add("wa-boomhit"); }
+    else if (ev.type === "gold") { sfx.coin(); if (mine) sfx.sparkle(); el.classList.add("wa-bonked"); }
+    else { sfx.bonk(); el.classList.add("wa-bonked"); }
+    const pop = document.createElement("div");
+    pop.className = "plusone" + (WHACK_PTS[ev.type] < 0 ? " minusone" : "");
+    pop.textContent = `${mine ? "나" : (p ? p.nick : "?")} ${WHACK_PTS[ev.type] > 0 ? "+" : ""}${WHACK_PTS[ev.type]}`;
+    el.appendChild(pop);
+    setTimeout(() => { el.remove(); delete c.moleEls[ev.i]; }, 500);
   },
 
   _spawnMole(ctx, ev) {
@@ -992,21 +1042,10 @@ const whack = {
     }
     mole.addEventListener("pointerdown", e => {
       e.preventDefault();
-      if (c.hitSet.has(ev.i)) return;
-      c.hitSet.add(ev.i);
-      c.score += WHACK_PTS[ev.type];
-      c.scoreEl.textContent = c.score;
-      if (ev.type === "bomb") { sfx.buzz(); vibrate(180); mole.classList.add("wa-boomhit"); }
-      else if (ev.type === "gold") { sfx.coin(); sfx.sparkle(); mole.classList.add("wa-bonked"); }
-      else { sfx.bonk(); mole.classList.add("wa-bonked"); }
-      const pop = document.createElement("div");
-      pop.className = "plusone" + (WHACK_PTS[ev.type] < 0 ? " minusone" : "");
-      pop.textContent = (WHACK_PTS[ev.type] > 0 ? "+" : "") + WHACK_PTS[ev.type];
-      mole.appendChild(pop);
-      setTimeout(() => { mole.remove(); delete c.moleEls[ev.i]; }, 420);
-      const t = ctx.now();
-      if (t - c.lastWrite > 500) { c.lastWrite = t; ctx.writeInput({ score: c.score }); }
-      else { clearTimeout(c.wTimer); c.wTimer = setTimeout(() => ctx.writeInput({ score: c.score }), 520); }
+      const claims = (ctx.game().claims) || {};
+      if (claims[ev.i] || c.claimShown[ev.i]) return;
+      // 선착순 클레임 — 제일 빨리 누른 한 명만 점수 (폭탄이면 감점도 그 한 명만)
+      ctx.txn(`game/claims/${ev.i}`, cur => (cur === null ? { u: ctx.uid, t: Date.now() } : undefined)).catch(() => {});
     });
     hole.appendChild(mole);
     c.moleEls[ev.i] = mole;
@@ -1018,18 +1057,16 @@ const whack = {
     if (state && state.startAt && ctx.now() > state.startAt + WHACK_DUR + 700) return 1400;
     return false;
   },
-  evaluate(ctx, inputs) {
-    inputs = inputs || {};
+  evaluate(ctx, inputs, state) {
+    const score = whackScores(ctx, state);
     const players = Object.keys(ctx.players());
-    const played = players.filter(p => inputs[p] && typeof inputs[p].score === "number")
-      .sort((a, b) => inputs[b].score - inputs[a].score);
-    return tierOutcome(ctx, played, pid => inputs[pid].score + "점", "멍때렸다… 💤");
+    const ranked = players.slice().sort((a, b) => score[b] - score[a]);
+    return tierOutcome(ctx, ranked, pid => score[pid] + "점", "멍때렸다… 💤");
   },
   unmount() {
     const c = this._c;
     if (!c) return;
     if (c.stopLoop) c.stopLoop();
-    clearTimeout(c.wTimer);
     this._c = null;
   }
 };
@@ -1129,14 +1166,19 @@ const typing = {
         c.input.value = "";
         sfx.pop();
       }
+      // 클레임 표시는 소유자가 바뀔 때마다 갱신 — 트랜잭션이 로컬에 먼저 낙관 적용됐다가
+      // 서버에서 다른 사람 승리로 뒤집히는 경우 "내가 먹었다" 오표시가 남지 않게
       const cl = claims[active.i];
-      if (cl && !c.claimedShown[active.i]) {
-        c.claimedShown[active.i] = true;
-        const p = ctx.players()[cl.u];
-        c.subEl.textContent = cl.u === ctx.uid ? "🎉 내가 먹었다!!" : `😢 ${p ? p.nick : "?"}이(가) 가져감!`;
-        c.wordEl.classList.add("tw-claimed");
-      } else if (!cl) {
-        c.wordEl.classList.remove("tw-claimed");
+      const owner = cl ? cl.u : null;
+      if (c.claimedShown[active.i] !== owner) {
+        c.claimedShown[active.i] = owner;
+        if (owner) {
+          const p = ctx.players()[owner];
+          c.subEl.textContent = owner === ctx.uid ? "🎉 내가 먹었다!!" : `😢 ${p ? p.nick : "?"}이(가) 가져감!`;
+          c.wordEl.classList.add("tw-claimed");
+        } else {
+          c.wordEl.classList.remove("tw-claimed");
+        }
       }
     } else {
       if (c.activeIdx !== -1) {
@@ -1247,9 +1289,10 @@ const bomb = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { map: {}, lastBoomKey: "", lastHolder: null };
+    const c = this._c = { map: {}, lastBoomKey: "", lastHolder: null, passing: false };
     stage.innerHTML = `
       <div class="grab-field bomb-field" id="bombField">
+        <div class="bomb-prob" id="bombProb">💥 1%</div>
         <div class="bomb-token" id="bombToken" style="display:none">💣</div>
         <div class="bomb-bang" id="bombBang" style="display:none">펑!!</div>
       </div>`;
@@ -1258,6 +1301,7 @@ const bomb = {
     c.token = stage.querySelector("#bombToken");
     c.bang = stage.querySelector("#bombBang");
     c.note = stage.querySelector("#bombNote");
+    c.prob = stage.querySelector("#bombProb");
 
     for (const [pid, p] of Object.entries(ctx.players())) {
       const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 54 });
@@ -1267,7 +1311,7 @@ const bomb = {
         mk.className = "you-mark"; mk.textContent = "▼ 나";
         el.appendChild(mk);
       }
-      el.addEventListener("click", () => this._tryPass(ctx, pid));
+      el.addEventListener("pointerdown", e => { e.preventDefault(); this._tryPass(ctx, pid); });
       c.map[pid] = el;
       c.field.appendChild(el);
     }
@@ -1280,14 +1324,44 @@ const bomb = {
     return Object.keys(ctx.players()).filter(id => !out[id]);
   },
 
-  _tryPass(ctx, target) {
+  /**
+   * 폭탄 전달을 게임 상태에 직접 트랜잭션으로 적용.
+   * 방장 릴레이를 거치지 않아 방장 탭이 느리거나 백그라운드여도 즉시 넘어간다.
+   * 동시 클릭/자동패스와 겹쳐도 트랜잭션이라 한 번만 적용됨.
+   */
+  _applyPass(ctx, from, target) {
+    return ctx.txn("game/state", cur => {
+      if (!cur || cur.holder !== from) return; // 이미 처리됨 → 중단
+      const out = cur.out || {};
+      if (out[target] || out[from] || target === from) return;
+      const passCount = cur.passCount || 0;
+      const p = Math.min(0.55, 0.01 + passCount * 0.045);
+      if (Math.random() < p) {
+        const newOut = Object.assign({}, out);
+        newOut[target] = 1;
+        const alive = Object.keys(ctx.players()).filter(id => !newOut[id]);
+        const nextHolder = alive.length ? alive[Math.floor(Math.random() * alive.length)] : target;
+        return Object.assign({}, cur, {
+          out: newOut, boom: { u: target, at: ctx.now() },
+          holder: nextHolder, passCount: 0, tAssign: ctx.now() + 1800
+        });
+      }
+      return Object.assign({}, cur, { holder: target, passCount: passCount + 1, tAssign: ctx.now() });
+    });
+  },
+
+  async _tryPass(ctx, target) {
     const c = this._c;
     const state = ctx.state();
-    if (!c || !state) return;
+    if (!c || !state || c.passing) return;
     const out = state.out || {};
     if (state.holder !== ctx.uid || out[target] || target === ctx.uid) return;
+    c.passing = true;
     sfx.swoosh();
+    // 예비 경로: 트랜잭션이 어떤 이유로든 실패하면 방장 릴레이(hostTick)가 처리
     ctx.writeInput({ pass: target, k: state.tAssign });
+    try { await this._applyPass(ctx, ctx.uid, target); } catch { /* noop */ }
+    c.passing = false;
   },
 
   _render(ctx) {
@@ -1317,8 +1391,13 @@ const bomb = {
       sfx.fuse();
       if (state.holder === ctx.uid) vibrate(120);
     }
-    // 확률/안내
+    // 확률/안내 — 원 가운데에 크게 + 하단 안내에도 표시
     const p = Math.min(55, Math.round((0.01 + state.passCount * 0.045) * 100));
+    const probTxt = `💥 ${p}%`;
+    if (c.prob.textContent !== probTxt) {
+      c.prob.textContent = probTxt;
+      c.prob.classList.toggle("hot", p >= 25);
+    }
     const hp = ctx.players()[state.holder];
     c.note.innerHTML = iAmHolder
       ? `💣 <b>친구를 눌러서 넘겨!</b> 지금 터질 확률 <b style="color:var(--red)">${p}%</b>`
@@ -1343,7 +1422,7 @@ const bomb = {
   onState() {},
   onInputs() {},
 
-  // 호스트: 패스 처리 + 봇/타임아웃 자동 패스
+  // 호스트: 예비 릴레이(클릭 트랜잭션 실패 시) + 봇/잠수 자동 패스
   hostTick(ctx, state, inputs) {
     if (!state || !state.holder) return;
     const players = ctx.players();
@@ -1365,16 +1444,7 @@ const bomb = {
       }
     }
     if (!target) return;
-    const p = Math.min(0.55, 0.01 + state.passCount * 0.045);
-    if (Math.random() < p) {
-      // 펑!! 받는 사람 아웃
-      const newOut = Object.assign({}, out); newOut[target] = 1;
-      const survivors = alive.filter(id => id !== target);
-      const nextHolder = survivors[Math.floor(Math.random() * survivors.length)];
-      ctx.writeState({ out: newOut, boom: { u: target, at: ctx.now() }, holder: nextHolder, passCount: 0, tAssign: ctx.now() + 1800 });
-    } else {
-      ctx.writeState({ holder: target, passCount: state.passCount + 1, tAssign: ctx.now() });
-    }
+    this._applyPass(ctx, holder, target).catch(() => {});
   },
 
   hostEarlyEnd(ctx, inputs, state) {
@@ -1768,193 +1838,7 @@ const block = {
 };
 
 // ═════════════════════════════════════════════
-// 10. 가라사대!
-// ═════════════════════════════════════════════
-const SIMON_START = 3000;
-const SIMON_ROUND_MS = 2000;
-const SIMON_DECIDE_MS = 1500;
-const SIMON_ROUNDS = 9;
-const SIMON_CMDS = [
-  "박수 쳐!", "만세!", "점프해!", "손 들어!", "발 굴러!",
-  "뒤로 돌아!", "눈 감아!", "브이!", "하이파이브!", "고개 끄덕!",
-  "허리 숙여!", "제자리 뛰기!"
-];
-
-function genCommands(seed) {
-  const rng = mulberry32(seed);
-  const pool = SIMON_CMDS.slice();
-  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  const rounds = [];
-  let t = 1000;
-  for (let i = 0; i < SIMON_ROUNDS; i++) {
-    rounds.push({ i, cmd: pool[i], prefixed: rng() < 0.58, at: t, ttl: SIMON_DECIDE_MS });
-    t += SIMON_ROUND_MS;
-  }
-  return { rounds, total: t };
-}
-
-const simon = {
-  id: "simon",
-  name: "가라사대!",
-  tag: "선생님이 말씀하시면만 따라해!",
-  desc: "명령 앞에 <b>'선생님이 말씀하시길'</b>이 붙으면 [따라하기!]를 눌러!<br>안 붙었는데 누르거나, 붙었는데 안 누르면 그 순간 탈락!<br>제일 오래 살아남은 사람이 승리!",
-
-  duration: () => SIMON_START + SIMON_ROUNDS * SIMON_ROUND_MS + 2500,
-  hostSetup(ctx) {
-    return { seed: Math.floor(Math.random() * 1e9), startAt: ctx.playStart + SIMON_START };
-  },
-
-  _c: null,
-  mount(stage, dock, ctx) {
-    const c = this._c = { lastCount: -1, started: false, roundIdx: -1, answered: {}, resolved: {}, out: {}, map: {} };
-    stage.innerHTML = `
-      <div class="wa-top">
-        <span class="sketch hud-chip">라운드 <b id="smRound">-</b>/${SIMON_ROUNDS}</span>
-        <span class="wa-count" id="smCount"></span>
-      </div>
-      <div class="sm-card sketch" id="smCard">
-        <div class="sm-prefix" id="smPrefix">선생님이 말씀하시길</div>
-        <div class="sm-cmd" id="smCmd">준비…</div>
-      </div>
-      <div class="char-field" id="smField"></div>`;
-    c.roundEl = stage.querySelector("#smRound");
-    c.countEl = stage.querySelector("#smCount");
-    c.card = stage.querySelector("#smCard");
-    c.prefixEl = stage.querySelector("#smPrefix");
-    c.cmdEl = stage.querySelector("#smCmd");
-    const field = stage.querySelector("#smField");
-    for (const [pid, p] of Object.entries(ctx.players())) {
-      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 50 });
-      if (pid === ctx.uid) el.classList.add("me");
-      c.map[pid] = el;
-      field.appendChild(el);
-    }
-
-    const btn = actionBtn(dock, "따라하기!");
-    btn.disabled = true;
-    c.btn = btn;
-    btn.addEventListener("pointerdown", e => {
-      e.preventDefault();
-      const state = ctx.state();
-      const sched = this._schedule(ctx);
-      if (!state || !sched || c.out[ctx.uid]) return;
-      const t = ctx.now() - state.startAt;
-      const r = sched.rounds.find(x => t >= x.at && t < x.at + x.ttl);
-      if (!r || c.answered[r.i]) return;
-      c.answered[r.i] = true;
-      ctx.writeInput({ ["r" + r.i]: 1 });
-      this._localFeedback(r.prefixed);
-    });
-
-    c.stopLoop = gameLoop(() => this._tick(ctx));
-  },
-
-  _schedule(ctx) {
-    const c = this._c;
-    const state = ctx.state();
-    if (!c.sched && state && state.seed !== undefined) c.sched = genCommands(state.seed);
-    return c.sched;
-  },
-
-  _localFeedback(ok) {
-    const c = this._c;
-    c.card.classList.remove("sm-ok", "sm-bad");
-    void c.card.offsetWidth;
-    c.card.classList.add(ok ? "sm-ok" : "sm-bad");
-    (ok ? sfx.correct : sfx.wrong)();
-    if (!ok) vibrate(200);
-  },
-
-  _tick(ctx) {
-    const c = this._c;
-    if (!c) return;
-    const state = ctx.state();
-    if (!state || !state.startAt) return;
-    const sched = this._schedule(ctx);
-    const t = ctx.now();
-    if (t < state.startAt) {
-      const n = Math.ceil((state.startAt - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; sfx.beep(); }
-      return;
-    }
-    if (!c.started) { c.started = true; c.btn.disabled = false; c.countEl.textContent = ""; sfx.go(); }
-    if (!sched) return;
-    const e = t - state.startAt;
-    const r = sched.rounds.find(x => e >= x.at && e < x.at + x.ttl);
-    if (r) {
-      if (c.roundIdx !== r.i) {
-        c.roundIdx = r.i;
-        c.roundEl.textContent = r.i + 1;
-        c.cmdEl.textContent = r.cmd;
-        c.prefixEl.classList.toggle("show", r.prefixed);
-        c.card.className = "sm-card sketch" + (r.prefixed ? " sm-armed" : "");
-      }
-    } else {
-      const prev = c.roundIdx >= 0 ? sched.rounds[c.roundIdx] : null;
-      if (prev && !c.resolved[prev.i] && e >= prev.at + prev.ttl) this._resolveRound(ctx, prev);
-      if (c.cmdEl.textContent !== "…") {
-        c.cmdEl.textContent = "…";
-        c.prefixEl.classList.remove("show");
-        c.card.className = "sm-card sketch";
-      }
-    }
-  },
-
-  _resolveRound(ctx, r) {
-    const c = this._c;
-    if (c.resolved[r.i]) return;
-    c.resolved[r.i] = true;
-    const inputs = ctx.inputs() || {};
-    for (const pid of Object.keys(ctx.players())) {
-      if (c.out[pid]) continue;
-      const tapped = !!(inputs[pid] && inputs[pid]["r" + r.i]);
-      if (tapped !== r.prefixed) {
-        c.out[pid] = true;
-        const el = c.map[pid];
-        if (el) { setFace(el, "dead"); setM(el, "caught"); el.style.opacity = 0.4; }
-      }
-    }
-  },
-
-  onState() {},
-  onInputs() {},
-  hostEarlyEnd(ctx, inputs, state) {
-    if (!state || !state.startAt) return false;
-    const sched = this._c && this._c.sched;
-    if (!sched) return false;
-    const last = sched.rounds[sched.rounds.length - 1];
-    if (ctx.now() - state.startAt > last.at + last.ttl + 900) return 1400;
-    return false;
-  },
-  evaluate(ctx, inputs, state) {
-    inputs = inputs || {};
-    const sched = genCommands(state && state.seed !== undefined ? state.seed : 0);
-    const players = Object.keys(ctx.players());
-    const survived = {};
-    for (const pid of players) {
-      let s = 0;
-      for (const r of sched.rounds) {
-        const tapped = !!(inputs[pid] && inputs[pid]["r" + r.i]);
-        if (tapped !== r.prefixed) break;
-        s++;
-      }
-      survived[pid] = s;
-    }
-    const ranked = players.slice().sort((a, b) => survived[b] - survived[a]);
-    return tierOutcome(ctx, ranked,
-      pid => survived[pid] >= SIMON_ROUNDS ? "완벽 클리어! 🎉" : `${survived[pid]}/${SIMON_ROUNDS}에서 실수`,
-      "안 움직였다… 💤");
-  },
-  unmount() {
-    const c = this._c;
-    if (!c) return;
-    if (c.stopLoop) c.stopLoop();
-    this._c = null;
-  }
-};
-
-// ═════════════════════════════════════════════
-// 11. 줄다리기!
+// 10. 줄다리기!
 // ═════════════════════════════════════════════
 const TUG_LEAD = 3000;
 const TUG_DUR = 15000;
@@ -2135,7 +2019,7 @@ const tug = {
 };
 
 // ═════════════════════════════════════════════
-// 12. 조심히 깨우기!
+// 11. 조심히 깨우기!
 // ═════════════════════════════════════════════
 const WAKE_LEAD = 3000;
 const WAKE_SWING_PERIOD = 900;
@@ -2357,5 +2241,5 @@ const wake = {
   }
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "simon", "tug", "wake"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, simon, tug, wake };
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "tug", "wake"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, tug, wake };

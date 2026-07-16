@@ -3,7 +3,7 @@ import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
 import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { GAMES, GAME_IDS, genWords } from "./games.js";
+import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -663,7 +663,7 @@ async function runResult(token) {
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록",
-  simon: "가라사대", tug: "줄다리기", wake: "깨우기"
+  tug: "줄다리기", wake: "깨우기"
 };
 
 // 최종 리더보드
@@ -982,11 +982,16 @@ function botDrive() {
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { e: Math.round(state.target * 1000 + (Math.random() * 1800 - 900)) });
       }
     } else if (g === "whack") {
-      if (state && state.startAt && t > state.startAt && t < state.startAt + 30000 && Math.random() < 0.3) {
-        const cur = (inp && inp.score) || 0;
-        const roll = Math.random();
-        const d = roll < 0.12 ? -2 : roll < 0.3 ? 3 : 1;
-        net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { score: cur + d });
+      // 공유 두더지 선착순 클레임 — 봇도 사람처럼 활성 두더지를 두고 경쟁
+      if (state && state.seed !== undefined && state.startAt && t > state.startAt) {
+        const e = t - state.startAt;
+        const claims = (gameCache && gameCache.claims) || {};
+        const active = genMoles(state.seed).find(ev =>
+          e >= ev.at && e < ev.at + ev.ttl && !claims[ev.i] &&
+          (ev.type !== "bomb" || Math.random() < 0.15));
+        if (active && Math.random() < 0.25) {
+          net.dbTxn(`rooms/${room}/game/claims/${active.i}`, cur => (cur === null ? { u: pid, t: Date.now() } : undefined)).catch(() => {});
+        }
       }
     } else if (g === "typing") {
       if (state && state.seed !== undefined && state.startAt && t > state.startAt) {

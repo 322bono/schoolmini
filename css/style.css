@@ -689,6 +689,17 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   animation: bombWobble 0.5s ease-in-out infinite;
   filter: drop-shadow(2px 3px 0 rgba(51, 49, 46, 0.25));
 }
+/* 캐릭터 원 한가운데의 폭발 확률 표시 */
+.bomb-prob {
+  position: absolute; left: 50%; top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: clamp(1.7rem, 6vw, 2.6rem); font-weight: 700;
+  color: var(--ink-soft);
+  pointer-events: none;
+  transition: color 0.3s;
+}
+.bomb-prob.hot { color: var(--red); animation: probPulse 0.8s ease-in-out infinite; }
+@keyframes probPulse { 50% { transform: translate(-50%, -50%) scale(1.12); } }
 @keyframes bombWobble { 50% { transform: translate(-50%, -58%) rotate(12deg); } }
 .bomb-bang {
   position: absolute; z-index: 9;
@@ -759,21 +770,6 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .bk-bench .char { width: 44px; }
 .char.bk-land { animation: bkLand 0.3s cubic-bezier(0.2, 1.9, 0.4, 1); }
 @keyframes bkLand { from { transform: translateY(-46px) scale(1.25); opacity: 0.4; } }
-
-/* ── 가라사대! ────────────────────────────── */
-.sm-card { min-width: min(460px, 90vw); text-align: center; padding: 1.4rem 1rem 1.1rem; }
-.sm-prefix {
-  font-size: 1.05rem; font-weight: 700; color: var(--red);
-  opacity: 0; transform: translateY(6px); transition: opacity 0.15s, transform 0.15s;
-  margin-bottom: 0.3rem;
-}
-.sm-prefix.show { opacity: 1; transform: translateY(0); }
-.sm-cmd { font-size: clamp(2rem, 8vw, 3rem); font-weight: 700; line-height: 1.2; }
-.sm-card.sm-armed { background: #ffe2da; border-color: var(--red); }
-.sm-card.sm-armed .sm-cmd { color: var(--red); }
-.sm-card.sm-ok { animation: smPop 0.35s cubic-bezier(0.2, 1.8, 0.4, 1); }
-.sm-card.sm-bad { animation: twShake 0.4s; background: #ffe2da; border-color: var(--red); }
-@keyframes smPop { 40% { transform: scale(1.08); } }
 
 /* ── 줄다리기! ────────────────────────────── */
 .tug-wrap { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.3rem; min-height: 0; }
