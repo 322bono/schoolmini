@@ -559,8 +559,10 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   font-size: clamp(3.4rem, 13vw, 5.2rem); font-weight: 700;
   padding: 0.05em 0.5em; min-width: 4.2em; text-align: center;
   font-variant-numeric: tabular-nums;
+  opacity: 1; transition: opacity 0.45s ease;
 }
 .cs-clock.hidden-time { color: var(--ink-soft); letter-spacing: 0.1em; }
+.cs-clock.cs-fading { opacity: 0; }
 .cs-note { font-size: 1.1rem; color: var(--ink-soft); }
 .cs-minirow { display: flex; flex-wrap: wrap; gap: 0.8rem 1rem; justify-content: center; padding: 0.4rem 0; }
 
@@ -772,6 +774,64 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .sm-card.sm-ok { animation: smPop 0.35s cubic-bezier(0.2, 1.8, 0.4, 1); }
 .sm-card.sm-bad { animation: twShake 0.4s; background: #ffe2da; border-color: var(--red); }
 @keyframes smPop { 40% { transform: scale(1.08); } }
+
+/* ── 줄다리기! ────────────────────────────── */
+.tug-wrap { flex: 1; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.3rem; min-height: 0; }
+.tug-status { text-align: center; font-size: 1.9rem; font-weight: 700; color: var(--red); min-height: 1.4em; }
+.tug-arena { flex: 1; display: flex; flex-direction: column; gap: 0.3rem; min-height: 0; }
+.tug-team { flex: 1; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.4rem 0.7rem; min-height: 64px; }
+.tug-team.tug-b .char-box svg { transform: scaleX(-1); }
+.tug-track { position: relative; height: 34px; margin: 0 0.6rem; }
+.tug-zone-a, .tug-zone-b {
+  position: absolute; top: 50%; height: 10px; transform: translateY(-50%); border-radius: 6px;
+}
+.tug-zone-a { left: 4%; width: 32%; background: rgba(224, 71, 47, 0.3); }
+.tug-zone-b { right: 4%; width: 32%; background: rgba(59, 111, 212, 0.3); }
+.tug-rope-line {
+  position: absolute; top: 50%; left: 4%; right: 4%; height: 5px; transform: translateY(-50%);
+  background: #b58a4a; border-radius: 3px; box-shadow: 0 2px 0 rgba(51, 49, 46, 0.25);
+}
+.tug-knot {
+  position: absolute; top: 50%; font-size: 1.7rem; transform: translate(-50%, -50%);
+  transition: left 0.3s cubic-bezier(0.3, 1, 0.4, 1);
+}
+.char.tug-pull .char-box { animation: tugPullL 0.22s cubic-bezier(0.3, 1.7, 0.4, 1); }
+.tug-team.tug-b .char.tug-pull .char-box { animation: tugPullR 0.22s cubic-bezier(0.3, 1.7, 0.4, 1); }
+@keyframes tugPullL { 40% { transform: translateX(-10%) rotate(-5deg) scale(1.08); } }
+@keyframes tugPullR { 40% { transform: translateX(10%) rotate(5deg) scale(1.08); } }
+
+/* ── 조심히 깨우기! ───────────────────────── */
+.wk-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6rem; padding: 0.4rem; }
+.wk-dog { font-size: 4rem; position: relative; animation: wkBob 1.8s ease-in-out infinite; }
+.wk-dog .wk-zzz { position: absolute; top: -0.25em; right: -0.55em; font-size: 0.5em; animation: wkZzz 1.6s ease-in-out infinite; }
+@keyframes wkBob { 50% { transform: translateY(-6%) rotate(-2deg); } }
+@keyframes wkZzz { 0%, 100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-6px); } }
+.wk-dog.wk-awake { animation: wkShake 0.4s ease-in-out 3; }
+.wk-dog.wk-awake .wk-zzz { display: none; }
+@keyframes wkShake { 25% { transform: translateX(-8px) rotate(-6deg); } 75% { transform: translateX(8px) rotate(6deg); } }
+.wk-meter { width: min(420px, 90vw); height: 14px; border: 3px solid var(--ink); border-radius: 8px; background: var(--paper-2); overflow: hidden; }
+.wk-meter-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--green), #f5c518, var(--red)); transition: width 0.35s ease; }
+.wk-status { font-size: 1.1rem; font-weight: 700; min-height: 1.6em; text-align: center; }
+.wk-bar {
+  position: relative; width: min(460px, 92vw); height: 46px;
+  border: 3px solid var(--ink); border-radius: var(--r1); background: var(--paper-2);
+  overflow: hidden; cursor: pointer;
+}
+.wk-seg { position: absolute; top: 0; bottom: 0; }
+.wk-seg.wk-red { background: rgba(224, 71, 47, 0.55); }
+.wk-seg.wk-orange { background: rgba(245, 166, 35, 0.5); }
+.wk-seg.wk-green { background: rgba(88, 182, 71, 0.45); }
+.wk-needle {
+  position: absolute; top: -4px; bottom: -4px; width: 4px; background: var(--ink);
+  transform: translateX(-50%); box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6);
+}
+.wk-bar.wk-flash-green { animation: wkFlash 0.4s; --fc: var(--green); }
+.wk-bar.wk-flash-orange { animation: wkFlash 0.4s; --fc: #f5a623; }
+.wk-bar.wk-flash-red { animation: wkFlash 0.4s; --fc: var(--red); }
+@keyframes wkFlash { 30% { box-shadow: inset 0 0 0 6px var(--fc); } 100% { box-shadow: none; } }
+.wk-order { display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem; justify-content: center; }
+.wk-order .char { width: 40px; opacity: 0.5; transition: opacity 0.2s, transform 0.2s; }
+.wk-order .char.wk-active { opacity: 1; transform: scale(1.2) translateY(-4px); }
 
 /* ±0 표시 */
 .zeropop { color: var(--ink-soft); }

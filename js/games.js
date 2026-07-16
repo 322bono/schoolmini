@@ -841,11 +841,20 @@ const choseki = {
     }
     const e = t - state.startAt;
     if (e < 1200) {
-      c.clock.classList.remove("hidden-time");
+      clearTimeout(c.fadeTimer);
+      c.hiding = false;
+      c.clock.classList.remove("hidden-time", "cs-fading");
       c.clock.textContent = (e / 1000).toFixed(2);
-    } else if (!c.clock.classList.contains("hidden-time")) {
-      c.clock.classList.add("hidden-time");
-      c.clock.textContent = "?.?? 🙈";
+    } else if (!c.hiding) {
+      // 숫자를 바로 끊어버리지 않고, 서서히 페이드아웃한 뒤 가려진 표시로 교체
+      c.hiding = true;
+      c.clock.classList.add("cs-fading");
+      c.fadeTimer = setTimeout(() => {
+        if (!c.clock) return;
+        c.clock.classList.add("hidden-time");
+        c.clock.textContent = "?.?? 🙈";
+        c.clock.classList.remove("cs-fading");
+      }, 450);
     }
   },
 
@@ -881,6 +890,7 @@ const choseki = {
     const c = this._c;
     if (!c) return;
     if (c.stopLoop) c.stopLoop();
+    clearTimeout(c.fadeTimer);
     this._c = null;
   }
 };
@@ -1943,5 +1953,409 @@ const simon = {
   }
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "simon"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, simon };
+// ═════════════════════════════════════════════
+// 11. 줄다리기!
+// ═════════════════════════════════════════════
+const TUG_LEAD = 3000;
+const TUG_DUR = 15000;
+const TUG_WIN = 100;
+const TUG_SCALE = 1.4;
+
+const tug = {
+  id: "tug",
+  name: "줄다리기!",
+  tag: "우리 팀이 이길 때까지 당겨랏!",
+  desc: "팀을 나눠서 [당겨라!]를 미친 듯이 연타!<br>줄이 우리 쪽 끝까지 넘어오거나, 15초 뒤 더 많이 당긴 팀이 승리!<br>인원이 홀수면 한 명은 깍두기 — 구경만 하고 점수도 없어!",
+
+  duration: () => TUG_LEAD + TUG_DUR + 3000,
+  hostSetup(ctx) {
+    const ids = shuffle(Object.keys(ctx.players()));
+    let spare = null;
+    if (ids.length % 2 === 1) spare = ids.pop();
+    const half = ids.length / 2;
+    return {
+      teamA: ids.slice(0, half), teamB: ids.slice(half), spare,
+      rope: 0, winner: null, startAt: ctx.playStart + TUG_LEAD
+    };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, n: 0, lastWrite: 0, map: {}, lastRope: null, layoutDone: false, dock };
+    stage.innerHTML = `
+      <div class="tug-wrap">
+        <div class="tug-status" id="tugStatus">3</div>
+        <div class="tug-arena">
+          <div class="tug-team tug-a" id="tugTeamA"></div>
+          <div class="tug-track">
+            <div class="tug-zone tug-zone-a"></div>
+            <div class="tug-zone tug-zone-b"></div>
+            <div class="tug-rope-line"></div>
+            <div class="tug-knot" id="tugKnot">🔴</div>
+          </div>
+          <div class="tug-team tug-b" id="tugTeamB"></div>
+        </div>
+      </div>`;
+    c.statusEl = stage.querySelector("#tugStatus");
+    c.knot = stage.querySelector("#tugKnot");
+    c.fieldA = stage.querySelector("#tugTeamA");
+    c.fieldB = stage.querySelector("#tugTeamB");
+    this._layout(ctx);
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  // 팀 배정은 호스트가 게임 시작 시 정하는 값(state.teamA/B)이라 mount 시점엔
+  // 아직 Firebase에서 안 왔을 수 있음 — onState에서 재시도 (무궁화의 _layout과 동일 패턴)
+  _layout(ctx) {
+    const c = this._c;
+    if (!c || c.layoutDone) return;
+    const state = ctx.state();
+    if (!state || !state.teamA) return;
+    c.layoutDone = true;
+    const teamA = state.teamA, teamB = state.teamB || [], spare = state.spare;
+    const players = ctx.players();
+    for (const pid of teamA) {
+      const el = makeChar({ color: "#e0472f", nick: players[pid] ? players[pid].nick : "?", size: 50 });
+      if (pid === ctx.uid) el.classList.add("me");
+      c.map[pid] = el; c.fieldA.appendChild(el);
+    }
+    for (const pid of teamB) {
+      const el = makeChar({ color: "#3b6fd4", nick: players[pid] ? players[pid].nick : "?", size: 50 });
+      if (pid === ctx.uid) el.classList.add("me");
+      c.map[pid] = el; c.fieldB.appendChild(el);
+    }
+    if (spare === ctx.uid) {
+      c.dock.innerHTML = `<div class="game-note">🍢 이번 판은 깍두기! 구경만 해도 괜찮아~</div>`;
+    } else {
+      const btn = actionBtn(c.dock, "당겨라!");
+      btn.disabled = true;
+      c.btn = btn;
+      btn.addEventListener("pointerdown", e => {
+        e.preventDefault();
+        if (btn.disabled) return;
+        c.n++;
+        sfx.mash();
+        const el = c.map[ctx.uid];
+        if (el) { el.classList.remove("tug-pull"); void el.offsetWidth; el.classList.add("tug-pull"); }
+        const t = ctx.now();
+        if (t - c.lastWrite > 220) { c.lastWrite = t; ctx.writeInput({ n: c.n }); }
+      });
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    this._layout(ctx);
+    const state = ctx.state();
+    if (!state || !state.startAt) return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.statusEl.textContent = n; sfx.beep(); }
+      return;
+    }
+    if (!c.started) {
+      c.started = true;
+      c.statusEl.textContent = "당겨라!!";
+      if (c.btn) c.btn.disabled = false;
+      sfx.go();
+      setTimeout(() => { if (c.statusEl) c.statusEl.textContent = ""; }, 900);
+    }
+    const rope = state.rope || 0;
+    if (rope !== c.lastRope) {
+      c.lastRope = rope;
+      c.knot.style.left = (50 + rope * 0.4) + "%";
+    }
+  },
+
+  onState(state, ctx) { this._layout(ctx); },
+  onInputs(inputs, ctx) {
+    const c = this._c;
+    if (!c || !inputs) return;
+    this._layout(ctx);
+    for (const [pid, v] of Object.entries(inputs)) {
+      if (pid === ctx.uid) continue;
+      const el = c.map[pid];
+      if (!el || typeof v.n !== "number") continue;
+      if (el._lastN !== v.n) {
+        el._lastN = v.n;
+        el.classList.remove("tug-pull");
+        void el.offsetWidth;
+        el.classList.add("tug-pull");
+      }
+    }
+  },
+
+  // 호스트: 매 틱 팀별 연타 합산 → 줄 위치 갱신 (경계 넘으면 즉시 승부 확정)
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.startAt || state.winner) return;
+    const t = ctx.now();
+    if (t < state.startAt) return;
+    inputs = inputs || {};
+    const sum = ids => ids.reduce((s, pid) => s + ((inputs[pid] && inputs[pid].n) || 0), 0);
+    const a = sum(state.teamA || []), b = sum(state.teamB || []);
+    const rope = Math.max(-TUG_WIN, Math.min(TUG_WIN, Math.round((b - a) * TUG_SCALE)));
+    if (rope === state.rope) return;
+    const patch = { rope };
+    if (Math.abs(rope) >= TUG_WIN) patch.winner = rope < 0 ? "A" : "B";
+    ctx.writeState(patch);
+  },
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || !state.startAt) return false;
+    const t = ctx.now();
+    if (t < state.startAt) return false;
+    if (state.winner) return 1800;
+    if (t - state.startAt > TUG_DUR) return 1200;
+    return false;
+  },
+  evaluate(ctx, inputs, state) {
+    state = state || {};
+    const teamA = state.teamA || [], teamB = state.teamB || [];
+    const rope = state.rope || 0;
+    const winner = state.winner || (rope < 0 ? "A" : rope > 0 ? "B" : null);
+    const outcome = {}, detail = {};
+    for (const pid of teamA) {
+      outcome[pid] = winner === null ? "mid" : winner === "A" ? "win" : "lose";
+      detail[pid] = winner === null ? "무승부! (±0)" : winner === "A" ? "우리 팀 승리! 🏆" : "졌다… 😢";
+    }
+    for (const pid of teamB) {
+      outcome[pid] = winner === null ? "mid" : winner === "B" ? "win" : "lose";
+      detail[pid] = winner === null ? "무승부! (±0)" : winner === "B" ? "우리 팀 승리! 🏆" : "졌다… 😢";
+    }
+    if (state.spare) { outcome[state.spare] = "mid"; detail[state.spare] = "깍두기 (구경만 함)"; }
+    return { outcome, detail };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
+// 12. 조심히 깨우기!
+// ═════════════════════════════════════════════
+const WAKE_LEAD = 3000;
+const WAKE_SWING_PERIOD = 900;
+const WAKE_TURN_GAP = 700;
+const WAKE_AUTO_MS = 3000;
+const WAKE_MAX_TURNS = 20;
+const WAKE_ZONE_STACK = { green: 1, orange: 2, red: 4 };
+
+/** 바늘이 좌우로 왕복하는 위치 (0~100), 순수 시간의 함수라 모든 클라이언트가 동일하게 봄 */
+function wakeSwingPos(elapsed) {
+  const phase = ((elapsed % WAKE_SWING_PERIOD) + WAKE_SWING_PERIOD) % WAKE_SWING_PERIOD / WAKE_SWING_PERIOD;
+  return (phase < 0.5 ? phase * 2 : 2 - phase * 2) * 100;
+}
+function wakeZoneAt(pos) {
+  if (pos < 12 || pos > 88) return "red";
+  if (pos < 32 || pos > 68) return "orange";
+  return "green";
+}
+
+const wake = {
+  id: "wake",
+  name: "조심히 깨우기!",
+  tag: "들개를 깨우지 마…!",
+  desc: "차례가 오면 좌우로 왔다갔다하는 바늘을 [탁!]으로 멈춰!<br>초록은 조금, 주황은 좀 더, 빨강은 많이 — 들개한테 스택이 쌓여!<br>스택이 (매판 랜덤인) 한계를 넘으면 들개가 깨서 그 순간 멈춘 사람이 탈락!",
+
+  duration: () => WAKE_LEAD + WAKE_MAX_TURNS * (WAKE_AUTO_MS + WAKE_TURN_GAP) + 3000,
+  hostSetup(ctx) {
+    const order = shuffle(Object.keys(ctx.players()));
+    const threshold = 8 + Math.floor(Math.random() * 9); // 8~16
+    return {
+      order, turn: 0, stack: 0, threshold, out: null, awake: false, done: false,
+      turnsTaken: 0, lastZone: null, turnStartAt: ctx.playStart + WAKE_LEAD
+    };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { map: {}, lastTurn: -1, lastTurnStartAt: 0, answered: {}, wokeShown: false, lastStackShown: undefined, layoutDone: false };
+    stage.innerHTML = `
+      <div class="wk-wrap">
+        <div class="wk-dog" id="wkDog">🐶<span class="wk-zzz">💤</span></div>
+        <div class="wk-meter"><div class="wk-meter-fill" id="wkMeterFill"></div></div>
+        <div class="wk-status" id="wkStatus">순서 정하는 중…</div>
+        <div class="wk-bar" id="wkBar">
+          <div class="wk-seg wk-red" style="left:0%;width:12%"></div>
+          <div class="wk-seg wk-orange" style="left:12%;width:20%"></div>
+          <div class="wk-seg wk-green" style="left:32%;width:36%"></div>
+          <div class="wk-seg wk-orange" style="left:68%;width:20%"></div>
+          <div class="wk-seg wk-red" style="left:88%;width:12%"></div>
+          <div class="wk-needle" id="wkNeedle"></div>
+        </div>
+        <div class="wk-order" id="wkOrder"></div>
+      </div>`;
+    c.dog = stage.querySelector("#wkDog");
+    c.meterFill = stage.querySelector("#wkMeterFill");
+    c.statusEl = stage.querySelector("#wkStatus");
+    c.bar = stage.querySelector("#wkBar");
+    c.needle = stage.querySelector("#wkNeedle");
+    c.orderRow = stage.querySelector("#wkOrder");
+
+    const btn = actionBtn(dock, "탁!");
+    btn.disabled = true;
+    c.btn = btn;
+    const tap = e => { e.preventDefault(); this._tryStop(ctx); };
+    btn.addEventListener("pointerdown", tap);
+    c.bar.addEventListener("pointerdown", tap);
+
+    this._layout(ctx);
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  // 차례 순서(state.order)는 호스트가 정하는 값이라 mount 시점엔 아직 안 왔을 수
+  // 있음 — onState에서 재시도 (무궁화의 _layout과 동일 패턴)
+  _layout(ctx) {
+    const c = this._c;
+    if (!c || c.layoutDone) return;
+    const state = ctx.state();
+    if (!state || !state.order || !state.order.length) return;
+    c.layoutDone = true;
+    const players = ctx.players();
+    for (const pid of state.order) {
+      const el = makeChar({ color: ctx.colorOf(pid), nick: players[pid] ? players[pid].nick : "?", size: 40 });
+      if (pid === ctx.uid) el.classList.add("me");
+      c.map[pid] = el;
+      c.orderRow.appendChild(el);
+    }
+  },
+
+  _tryStop(ctx) {
+    const c = this._c;
+    const state = ctx.state();
+    if (!c || !state || state.awake || state.done || !state.order || !state.order.length) return;
+    if (state.order[state.turn % state.order.length] !== ctx.uid) return;
+    if (c.answered[state.turnStartAt]) return;
+    c.answered[state.turnStartAt] = true;
+    const pos = wakeSwingPos(ctx.now() - state.turnStartAt);
+    ctx.writeInput({ pos: Math.round(pos * 10) / 10, turnKey: state.turnStartAt });
+    sfx.click();
+    if (c.btn) c.btn.disabled = true;
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    this._layout(ctx);
+    const state = ctx.state();
+    if (!state || !state.turnStartAt || !state.order || !state.order.length) return;
+    const t = ctx.now();
+    if (t < state.turnStartAt && c.lastTurn === -1) {
+      const n = Math.ceil((state.turnStartAt - t) / 1000);
+      this._setStatus(`잠시 후 시작… ${n}`);
+      return;
+    }
+    if (state.awake || state.done) {
+      c.needle.style.opacity = 0;
+      this._setStatus(state.awake ? "들개가 깼다!! 😱" : "다들 무사히 살아남았다! 🎉");
+      return;
+    }
+    const activePid = state.order[state.turn % state.order.length];
+    const iAmActive = activePid === ctx.uid;
+    if (c.lastTurn !== state.turn || c.lastTurnStartAt !== state.turnStartAt) {
+      c.lastTurn = state.turn; c.lastTurnStartAt = state.turnStartAt;
+      c.answered = {};
+      if (c.btn) c.btn.disabled = !iAmActive;
+      [...c.orderRow.children].forEach((el, i) => el.classList.toggle("wk-active", state.order[i] === activePid));
+      const nick = (ctx.players()[activePid] || {}).nick || "?";
+      this._setStatus(iAmActive ? "내 차례! 안전한 곳에서 멈춰!" : `${nick}의 차례…`);
+      sfx.pop();
+    }
+    c.meterFill.style.width = Math.min(100, (state.stack / (WAKE_MAX_TURNS * WAKE_ZONE_STACK.green)) * 100) + "%";
+    if (t >= state.turnStartAt) {
+      c.needle.style.opacity = 1;
+      c.needle.style.left = wakeSwingPos(t - state.turnStartAt) + "%";
+    }
+  },
+
+  _setStatus(text) {
+    const c = this._c;
+    if (c && c.statusEl && c.statusEl.textContent !== text) c.statusEl.textContent = text;
+  },
+
+  onState(state, ctx) {
+    const c = this._c;
+    if (!c || !state) return;
+    this._layout(ctx);
+    if (typeof state.stack === "number" && c.lastStackShown !== state.stack) {
+      c.lastStackShown = state.stack;
+      if (state.lastZone) this._flashZone(state.lastZone);
+    }
+    if (state.awake && !c.wokeShown) {
+      c.wokeShown = true;
+      c.dog.classList.add("wk-awake");
+      sfx.buzz(); vibrate(300);
+      const loser = state.order[state.turn % state.order.length];
+      const el = c.map[loser];
+      if (el) { setFace(el, "dead"); setMotion(el, "caught"); charSay(el, "으악!!", 2000); }
+    }
+  },
+  onInputs() {},
+
+  _flashZone(zone) {
+    const c = this._c;
+    if (!c || !c.bar) return;
+    c.bar.classList.remove("wk-flash-green", "wk-flash-orange", "wk-flash-red");
+    void c.bar.offsetWidth;
+    c.bar.classList.add("wk-flash-" + zone);
+    (zone === "red" ? sfx.wrong : zone === "orange" ? sfx.beep : sfx.correct)();
+  },
+
+  // 호스트: 현재 차례인 사람의 입력(또는 타임아웃 시 자동)을 처리 → 스택 갱신, 넘으면 각성
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.turnStartAt || state.awake || state.done || !state.order || !state.order.length) return;
+    const t = ctx.now();
+    if (t < state.turnStartAt) return;
+    const order = state.order;
+    const activePid = order[state.turn % order.length];
+    inputs = inputs || {};
+    const inp = inputs[activePid];
+    let pos = null;
+    if (inp && typeof inp.pos === "number" && inp.turnKey === state.turnStartAt) {
+      pos = inp.pos;
+    } else if (t - state.turnStartAt > WAKE_AUTO_MS) {
+      pos = Math.random() * 100; // 너무 오래 끌면 자동으로 아무 데나 멈춤
+    }
+    if (pos === null) return;
+    const zone = wakeZoneAt(pos);
+    const stack = state.stack + WAKE_ZONE_STACK[zone];
+    if (stack > state.threshold) {
+      ctx.writeState({ stack, awake: true, lastZone: zone, out: Object.assign({}, state.out, { [activePid]: 1 }) });
+      return;
+    }
+    const turnsTaken = (state.turnsTaken || 0) + 1;
+    if (turnsTaken >= WAKE_MAX_TURNS) {
+      ctx.writeState({ stack, done: true, lastZone: zone, turnsTaken });
+      return;
+    }
+    ctx.writeState({ stack, turn: state.turn + 1, turnsTaken, lastZone: zone, turnStartAt: ctx.now() + WAKE_TURN_GAP });
+  },
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state) return false;
+    if (state.awake) return 2400;
+    if (state.done) return 1400;
+    return false;
+  },
+  evaluate(ctx, inputs, state) {
+    const out = (state && state.out) || {};
+    const outcome = {}, detail = {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (out[pid]) { outcome[pid] = "lose"; detail[pid] = "들개를 깨워버렸다… 😱"; }
+      else { outcome[pid] = "win"; detail[pid] = "무사히 통과! 🐶💤"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "simon", "tug", "wake"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, simon, tug, wake };

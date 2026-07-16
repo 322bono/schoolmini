@@ -663,7 +663,7 @@ async function runResult(token) {
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록",
-  simon: "가라사대"
+  simon: "가라사대", tug: "줄다리기", wake: "깨우기"
 };
 
 // 최종 리더보드
