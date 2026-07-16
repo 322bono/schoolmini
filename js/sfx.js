@@ -27,9 +27,10 @@ export function toggleMute() {
   localStorage.setItem("sm_muted", muted ? "1" : "0");
   if (master) master.gain.value = muted ? 0 : 0.5;
   syncBgm();
-  // 라운드 음악도 음소거 연동
+  // 라운드/시상식 음악도 음소거 연동
   if (muted) { for (const el of Object.values(musicEls)) el.pause(); }
   else if (roundStarted && roundTrack) musicFor(roundTrack).play().catch(() => {});
+  else if (podiumOn) musicFor("podium").play().catch(() => {});
   return muted;
 }
 
@@ -75,6 +76,7 @@ const BUF_SRC = {
   fahh: "assets/fahh.mp3",
   yay: "assets/yay.mp3",
   gong: "assets/gong.mp3",
+  cheer: "assets/cheer.mp3",
   count: "assets/count.wav"
 };
 const bufs = {};
@@ -129,6 +131,7 @@ function playBuf(name, vol, onStart) {
 export const playFahh = onStart => playBuf("fahh", 0.9, onStart);
 export const playYay = () => playBuf("yay", 0.85);
 export const playGong = () => playBuf("gong", 0.9);
+export const playCheer = () => playBuf("cheer", 0.8);
 export const cdTick = () => playBuf("count", 0.65);
 
 // ── 라운드 음악 (게임 시작~결과 전까지) ─────────
@@ -136,9 +139,15 @@ let musicEls = {};
 let roundTrack = null;
 let roundStarted = false;
 
+const MUSIC_SRC = {
+  sunny: "assets/bgm-sunny.mp3",
+  apex: "assets/bgm-apex.mp3",
+  podium: "assets/bgm-podium.mp3"
+};
+
 function musicFor(track) {
   if (!musicEls[track]) {
-    const el = new Audio(track === "apex" ? "assets/bgm-apex.mp3" : "assets/bgm-sunny.mp3");
+    const el = new Audio(MUSIC_SRC[track] || MUSIC_SRC.sunny);
     el.loop = true;
     el.volume = 0.32;
     musicEls[track] = el;
@@ -164,9 +173,21 @@ export function gameStartFx() {
   }
 }
 
+let podiumOn = false;
+
+/** 최종 랭킹(1등 발표) 화면 음악 */
+export function playPodiumMusic() {
+  podiumOn = true;
+  if (muted) return;
+  const el = musicFor("podium");
+  el.currentTime = 0;
+  el.play().catch(() => {});
+}
+
 export function stopRoundMusic() {
   roundTrack = null;
   roundStarted = false;
+  podiumOn = false;
   for (const el of Object.values(musicEls)) el.pause();
 }
 

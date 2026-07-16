@@ -702,46 +702,6 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .tw-shake { animation: twShake 0.4s; }
 @keyframes twShake { 20%, 60% { transform: translateX(-9px) rotate(-1deg); } 40%, 80% { transform: translateX(9px) rotate(1deg); } }
 
-/* ── 폭탄 돌리기 ──────────────────────────── */
-.bomb-target { cursor: pointer; }
-.bomb-target .char-box { animation: targetPulse 0.95s ease-in-out infinite; }
-@keyframes targetPulse { 50% { transform: scale(1.14); } }
-.bomb-target::after {
-  content: "넘기기!";
-  position: absolute; top: -1.5em; left: 50%; transform: translateX(-50%);
-  font-size: 0.78rem; font-weight: 700; color: var(--red); white-space: nowrap;
-}
-.bomb-token {
-  position: absolute; z-index: 8;
-  font-size: 2.3rem;
-  transform: translate(-50%, -50%);
-  transition: left 0.55s cubic-bezier(0.3, 1.3, 0.4, 1), top 0.55s cubic-bezier(0.3, 1.3, 0.4, 1);
-  pointer-events: none;
-  animation: bombWobble 0.5s ease-in-out infinite;
-  filter: drop-shadow(2px 3px 0 rgba(51, 49, 46, 0.25));
-}
-/* 캐릭터 원 한가운데의 폭발 확률 표시 */
-.bomb-prob {
-  position: absolute; left: 50%; top: 50%;
-  transform: translate(-50%, -50%);
-  font-size: clamp(1.7rem, 6vw, 2.6rem); font-weight: 700;
-  color: var(--ink-soft);
-  pointer-events: none;
-  transition: color 0.3s;
-}
-.bomb-prob.hot { color: var(--red); animation: probPulse 0.8s ease-in-out infinite; }
-@keyframes probPulse { 50% { transform: translate(-50%, -50%) scale(1.12); } }
-@keyframes bombWobble { 50% { transform: translate(-50%, -58%) rotate(12deg); } }
-.bomb-bang {
-  position: absolute; z-index: 9;
-  transform: translate(-50%, -50%);
-  font-size: clamp(2.6rem, 10vw, 4.4rem); font-weight: 700; color: var(--red);
-  text-shadow: 2px 3px 0 rgba(51, 49, 46, 0.3);
-  animation: bangPop 0.5s cubic-bezier(0.2, 2, 0.4, 1);
-  pointer-events: none;
-}
-@keyframes bangPop { from { transform: translate(-50%, -50%) scale(0.15) rotate(-16deg); } }
-
 /* ── 최대한 빨리! (연타) ───────────────────── */
 .mash-top { min-height: 5.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.3rem; padding-top: 0.4rem; }
 .mash-num {
@@ -924,9 +884,10 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes bossDead { from { transform: scale(0.4); } 60% { transform: scale(1.25); } }
 .boss-kill {
   font-size: clamp(1.6rem, 7vw, 2.6rem); font-weight: 700; color: var(--red);
-  animation: bangPop 0.5s cubic-bezier(0.2, 2, 0.4, 1);
+  animation: bossKillPop 0.5s cubic-bezier(0.2, 2, 0.4, 1);
   text-align: center;
 }
+@keyframes bossKillPop { from { transform: scale(0.15) rotate(-16deg); opacity: 0; } }
 .boss-kill b { text-decoration: underline wavy; }
 
 /* ── 팽이 스핀! ───────────────────────────── */
@@ -1004,18 +965,6 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmTType { 0%, 15% { width: 0; } 55%, 100% { width: 3.6em; } }
 .dm-t-ok { color: var(--green); font-size: 1rem; opacity: 0; animation: dmTOk 3.4s infinite; }
 @keyframes dmTOk { 0%, 58% { opacity: 0; } 66%, 92% { opacity: 1; } 100% { opacity: 0; } }
-
-/* 폭탄: 폭탄이 돌다가 펑 */
-.dm-b-bomb { font-size: 1.7rem; animation: dmBBomb 4s ease-in-out infinite; }
-@keyframes dmBBomb {
-  0%, 18% { left: 16%; transform: translate(-50%, 0); }
-  24% { transform: translate(-50%, -18px); }
-  30%, 48% { left: 46%; transform: translate(-50%, 0); }
-  54% { transform: translate(-50%, -18px); }
-  60%, 100% { left: 76%; transform: translate(-50%, 0); }
-}
-.dm-b-boom { font-size: 2rem; opacity: 0; animation: dmBBoom 4s infinite; }
-@keyframes dmBBoom { 0%, 78% { opacity: 0; transform: translateX(-50%) scale(0.4); } 84%, 92% { opacity: 1; transform: translateX(-50%) scale(1.15); } 100% { opacity: 0; transform: translateX(-50%) scale(1.15); } }
 
 /* 연타: 미친 듯이 탭 */
 .dm-m-tap { animation: dmMTap 0.38s ease-in-out infinite; }

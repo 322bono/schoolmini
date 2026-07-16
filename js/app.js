@@ -1,7 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
 import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
-import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm, playFahh, playGong, setRoundMusic, stopRoundMusic } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playPodiumMusic, setRoundMusic, stopRoundMusic } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -12,7 +12,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const SLOT_MS = 7800;
 const INTRO_MS = 8400;
 const SPICY_MS = 3800;
-const SPICY_CHANCE = 0.22; // 라운드마다 스파이시(점수 3배) 확률
+const SPICY_CHANCE = 0.10; // 라운드마다 스파이시(점수 3배) 확률
 
 // ── 전역 상태 ────────────────────────────────
 let UID = null;
@@ -682,6 +682,7 @@ function runSlot() {
 function runIntro() {
   $("ovl-slot").classList.remove("show");
   const g = GAMES[meta.curGame];
+  if (!g) return;
   $("introName").textContent = g.name;
   $("introTag").textContent = `' ${g.tag} '`;
   const demoWrap = $("introDemo");
@@ -713,7 +714,6 @@ function spawnPoof(el) {
 // 결과 연출: 시간초과 도장 → 탈락자 하나씩 소멸 → 승자 +1
 async function runResult(token) {
   resultToken = token;
-  const quiet = !!(meta && meta.spicy); // 스파이시 라운드는 결과 발표 무음
   const ovl = $("ovl-result");
   const stamp = $("stampTimeover");
   const field = $("resultField");
@@ -721,9 +721,10 @@ async function runResult(token) {
   stamp.style.display = "none";
   field.innerHTML = "";
   scoreEl.innerHTML = "";
-  $("resultTitle").textContent = `${GAMES[meta.curGame].name} — 결과!`;
+  $("resultTitle").textContent = `${(GAMES[meta.curGame] || {}).name || "게임"} — 결과!`;
   ovl.classList.add("show");
-  if (!quiet) playGong(); // 결과 발표 공소리
+  playGong(); // 결과 발표 공소리 (스파이시 포함 항상)
+  setTimeout(() => { if (resultToken === token) playCheer(); }, 900); // 텀 두고 환호+박수
 
   // 결과 데이터 대기 (호스트 쓰기 반영 레이스 대비)
   let waited = 0;
@@ -734,7 +735,7 @@ async function runResult(token) {
 
   if (meta && meta.timeout) {
     stamp.style.display = "";
-    if (!quiet) sfx.timeover();
+    sfx.timeover();
     await sleep(2400);
     if (resultToken !== token) return;
   }
@@ -768,7 +769,7 @@ async function runResult(token) {
     if (resultToken !== token) return;
     setMotion(el, "dissolve");
     spawnPoof(el);
-    if (!quiet) sfx.poof();
+    sfx.poof();
     await sleep(520);
   }
   await sleep(800);
@@ -783,7 +784,8 @@ async function runResult(token) {
     el.appendChild(zero);
   }
   if (winners.length) {
-    if (!quiet) { sfx.win(); sfx.coin(); }
+    sfx.win();
+    sfx.coin();
     for (const pid of winners) {
       const el = charMap[pid];
       setFace(el, "happy");
@@ -812,7 +814,7 @@ async function runResult(token) {
 // 게임별 짧은 이름 (점수표 헤더용)
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
-  whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록",
+  whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이"
 };
 
@@ -887,7 +889,7 @@ function renderFinal() {
   });
   $("btnAgain").style.display = isHost ? "" : "none";
   sfx.tada();
-  setTimeout(() => startMelody(), 700);
+  setTimeout(() => playPodiumMusic(), 700);
   // 별 낙서 컨페티
   let n = 0;
   const conf = setInterval(() => {
@@ -1003,6 +1005,7 @@ async function hostAdvance(key) {
 
 async function hostStartPlay() {
   const g = GAMES[meta.curGame];
+  if (!g) return;
   const t0 = net.now() + 400;
   const nPlayers = Object.keys(playersCache).length;
   const state = g.hostSetup(makeCtx({ playStart: t0 }));
@@ -1020,6 +1023,7 @@ async function hostEndPlay(byTimer) {
   if (endedRounds.has(rk)) return;
   endedRounds.add(rk);
   const g = GAMES[meta.curGame];
+  if (!g) return;
   const res = g.evaluate(makeCtx(), (gameCache && gameCache.inputs) || {}, (gameCache && gameCache.state) || null);
   const { outcome, detail } = res;
   const losers = Object.values(outcome).filter(v => v !== "win" && v !== "mid").length;
