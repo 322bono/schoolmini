@@ -282,7 +282,7 @@ const mugunghwa = {
         <div class="dk-title">당신은 <b style="color:var(--hl)">술래</b>! 글자를 순서대로 눌러!</div>
         <div class="dk-progress" id="dkProgress"></div>
         <div class="mg-chips" id="mgChips"></div>
-        <div class="dk-timer" id="dkHint">7초 안에 못 외치면 자유이동 찬스를 줘버린다…!</div>
+        <div class="dk-timer" id="dkHint">순서대로 글자를 눌러서 완성해!</div>
       </div>`;
     c.field = stage.querySelector("#mgField");
     c.statusEl = stage.querySelector("#mgStatus");
@@ -478,14 +478,6 @@ const mugunghwa = {
     const id = Math.random().toString(36).slice(2, 7);
     c.cycleId = id;
     ctx.writeState({ cycle: { mode: "dark", start: ctx.now(), end: 0, id } });
-    // 7초 안에 못 외치면 자유이동 5초
-    c.cycleTimers.push(setTimeout(() => {
-      if (c.cycleId === id && c.progress < SYL.length) {
-        ctx.writeState({ cycle: { mode: "free", start: ctx.now(), end: ctx.now() + 5000, id } });
-        c.cycleTimers.push(setTimeout(() => this._taggerStartDark(ctx), 5050));
-        c.cycleId = null;
-      }
-    }, 7000));
   },
 
   _renderDark(ctx) {
@@ -510,7 +502,7 @@ const mugunghwa = {
       return;
     }
     // dark: 진행 상태 + 셔플 칩
-    hint.textContent = "7초 안에 못 외치면 자유이동 찬스를 줘버린다…!";
+    hint.textContent = "순서대로 글자를 눌러서 완성해!";
     this._renderProgress();
     c.chipsEl.innerHTML = "";
     for (const si of c.order) {
@@ -1285,7 +1277,7 @@ const bomb = {
     const out = state.out || {};
     if (state.holder !== ctx.uid || out[target] || target === ctx.uid) return;
     sfx.swoosh();
-    ctx.writeInput({ pass: target, k: state.passCount });
+    ctx.writeInput({ pass: target, k: state.tAssign });
   },
 
   _render(ctx) {
@@ -1351,7 +1343,7 @@ const bomb = {
     const holder = state.holder;
     const inp = inputs && inputs[holder];
     let target = null;
-    if (inp && inp.pass && inp.k === state.passCount && !out[inp.pass] && inp.pass !== holder && players[inp.pass]) {
+    if (inp && inp.pass && inp.k === state.tAssign && !out[inp.pass] && inp.pass !== holder && players[inp.pass]) {
       target = inp.pass;
     } else {
       // 봇이거나 너무 오래 들고 있으면 자동 패스
