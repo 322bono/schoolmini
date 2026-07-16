@@ -2251,6 +2251,373 @@ const wake = {
 };
 
 // ═════════════════════════════════════════════
+// 12. 눈치.. 숫자!
+// ═════════════════════════════════════════════
+const AVG_START = 3000;
+const AVG_PICK = 15000;
+
+const avg = {
+  id: "avg",
+  name: "눈치.. 숫자!",
+  tag: "모두의 평균에 가장 가까우면 승리!",
+
+  duration: () => AVG_START + AVG_PICK + 2500,
+  hostSetup(ctx) {
+    return { startAt: ctx.playStart + AVG_START };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, submitted: false, map: {} };
+    stage.innerHTML = `
+      <div class="avg-wrap">
+        <div class="avg-val sketch" id="avgVal">3</div>
+        <input type="range" min="0" max="100" value="50" class="avg-slider" id="avgSlider" disabled />
+        <div class="game-note">슬라이더로 0~100 숫자를 정하고 제출! 남들이 뭘 낼지 눈치싸움 👀</div>
+        <div class="cs-minirow" id="avgRow"></div>
+      </div>`;
+    c.valEl = stage.querySelector("#avgVal");
+    c.slider = stage.querySelector("#avgSlider");
+    const row = stage.querySelector("#avgRow");
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 42 });
+      if (pid === ctx.uid) el.classList.add("me");
+      c.map[pid] = el;
+      row.appendChild(el);
+    }
+    c.slider.addEventListener("input", () => {
+      if (c.started && !c.submitted) c.valEl.textContent = c.slider.value;
+    });
+    const btn = actionBtn(dock, "제출!");
+    btn.disabled = true;
+    c.btn = btn;
+    btn.addEventListener("click", () => {
+      if (!c.started || c.submitted) return;
+      c.submitted = true;
+      btn.disabled = true;
+      c.slider.disabled = true;
+      btn.textContent = `${c.slider.value} 제출 완료!`;
+      ctx.writeInput({ v: Number(c.slider.value) });
+      const el = c.map[ctx.uid];
+      if (el) { setMotion(el, "shout"); charSay(el, "냈다!", 1500); }
+      sfx.pop();
+    });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || !state.startAt) return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.valEl.textContent = n; cdTick(); }
+      return;
+    }
+    if (!c.started) {
+      c.started = true;
+      c.slider.disabled = false;
+      c.btn.disabled = false;
+      c.valEl.textContent = c.slider.value;
+      gameStartFx();
+    }
+  },
+
+  onState() {},
+  onInputs(inputs, ctx) {
+    const c = this._c;
+    if (!c || !inputs) return;
+    for (const pid of Object.keys(inputs)) {
+      if (pid === ctx.uid) continue;
+      const el = c.map[pid];
+      if (!el || el._done) continue;
+      el._done = true;
+      setMotion(el, "shout");
+      charSay(el, "냈다!", 1400);
+      sfx.pop();
+    }
+  },
+  hostEarlyEnd(ctx, inputs) {
+    const n = Object.keys(ctx.players()).length;
+    if (inputs && Object.keys(inputs).length >= n) return 1800;
+    return false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const subs = players.filter(p => inputs[p] && typeof inputs[p].v === "number");
+    if (!subs.length) {
+      const outcome = {}, detail = {};
+      for (const pid of players) { outcome[pid] = "lose"; detail[pid] = "아무도 안 냈다… 💤"; }
+      return { outcome, detail };
+    }
+    const avgV = subs.reduce((s, p) => s + inputs[p].v, 0) / subs.length;
+    const ranked = subs.slice().sort((a, b) =>
+      Math.abs(inputs[a].v - avgV) - Math.abs(inputs[b].v - avgV));
+    return tierOutcome(ctx, ranked,
+      pid => `${inputs[pid].v} (평균 ${avgV.toFixed(1)})`,
+      "안 냈다… 💤");
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
+// 13. 보스 막타 치기!
+// ═════════════════════════════════════════════
+const BOSS_START = 3000;
+const BOSS_HP_PER = 150;
+
+const boss = {
+  id: "boss",
+  name: "보스 막타 치기!",
+  tag: "마지막 한 방의 주인공은 +3 독식!",
+
+  stampOnTimeout: false,
+  duration: () => BOSS_START + 45000 + 2500,
+  hostSetup(ctx) {
+    const n = Object.keys(ctx.players()).length;
+    const hp = BOSS_HP_PER * n;
+    return { hp, hpMax: hp, killer: null, startAt: ctx.playStart + BOSS_START };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, pending: 0, lastFlush: 0, flushing: false, killShown: false };
+    stage.innerHTML = `
+      <div class="boss-wrap">
+        <div class="boss-hpbar sketch">
+          <div class="boss-hpfill" id="bossFill"></div>
+          <span class="boss-hptxt" id="bossTxt">100%</span>
+        </div>
+        <div class="wa-count" id="bossCount"></div>
+        <div class="boss-jar" id="bossJar">🏺</div>
+        <div class="boss-kill" id="bossKill" style="display:none"></div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">🏺 미친 듯이 연타! <b>마지막 타격</b>을 넣은 1명만 <b>+3</b>, 나머지는 0점!</div>`;
+    c.fill = stage.querySelector("#bossFill");
+    c.txt = stage.querySelector("#bossTxt");
+    c.jar = stage.querySelector("#bossJar");
+    c.kill = stage.querySelector("#bossKill");
+    c.countEl = stage.querySelector("#bossCount");
+
+    c.jar.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      const state = ctx.state();
+      if (!c.started || !state || state.killer || this._dispHp(state) <= 0) return;
+      c.pending++;
+      c.jar.classList.remove("boss-hit");
+      void c.jar.offsetWidth;
+      c.jar.classList.add("boss-hit");
+      sfx.bonk();
+      // 막타 눈치 구간(5% 미만)에선 즉시 반영, 평소엔 모아서 반영
+      const low = this._dispHp(state) / state.hpMax < 0.05;
+      if (low || ctx.now() - c.lastFlush > 350) this._flush(ctx);
+    });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _dispHp(state) {
+    const c = this._c;
+    return Math.max(0, (state.hp || 0) - (c ? c.pending : 0));
+  },
+
+  /** 쌓인 내 타격을 공유 HP에 트랜잭션으로 반영 — 0을 만든 사람이 막타 */
+  _flush(ctx) {
+    const c = this._c;
+    if (!c || !c.pending || c.flushing) return;
+    const dmg = c.pending;
+    c.flushing = true;
+    c.lastFlush = ctx.now();
+    ctx.txn("game/state", cur => {
+      if (!cur || cur.killer || cur.hp <= 0) return; // 이미 끝남
+      const nhp = cur.hp - dmg;
+      if (nhp <= 0) return Object.assign({}, cur, { hp: 0, killer: ctx.uid, killAt: ctx.now() });
+      return Object.assign({}, cur, { hp: nhp });
+    }).then(res => {
+      c.flushing = false;
+      if (res && res.committed) c.pending = Math.max(0, c.pending - dmg);
+      else c.pending = 0; // 이미 죽었으면 버림
+    }).catch(() => { c.flushing = false; });
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || !state.startAt) return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); }
+    if (c.pending && t - c.lastFlush > 350) this._flush(ctx);
+    const hp = this._dispHp(state);
+    const pct = Math.max(0, Math.min(100, (hp / state.hpMax) * 100));
+    c.fill.style.width = pct + "%";
+    c.txt.textContent = state.killer ? "0%" : Math.ceil(pct) + "%";
+    c.fill.classList.toggle("low", pct < 15);
+    // 막타 연출
+    if (state.killer && !c.killShown) {
+      c.killShown = true;
+      const p = ctx.players()[state.killer];
+      c.jar.textContent = "💥";
+      c.jar.classList.add("boss-dead");
+      c.kill.style.display = "";
+      c.kill.innerHTML = `막타!!! <b>${p ? p.nick : "?"}</b> +3`;
+      sfx.boom();
+      if (state.killer === ctx.uid) { sfx.win(); vibrate(300); }
+    }
+  },
+
+  onState() {},
+  onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    return state && state.killer ? 2400 : false;
+  },
+  evaluate(ctx, inputs, state) {
+    const killer = state ? state.killer : null;
+    const outcome = {}, detail = {}, delta = {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (pid === killer) { outcome[pid] = "win"; detail[pid] = "막타!!! 👑 +3"; delta[pid] = 3; }
+      else { outcome[pid] = "mid"; detail[pid] = killer ? "아깝다! (±0)" : "항아리가 버텼다… (±0)"; delta[pid] = 0; }
+    }
+    return { outcome, detail, delta };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
+// 14. 팽이 스핀!
+// ═════════════════════════════════════════════
+const SPIN_START = 3000;
+const SPIN_DUR = 7000;
+
+const SPINNER_SVG = `<svg viewBox="0 0 100 100" aria-hidden="true">
+  <g stroke="#33312e" stroke-width="3.4">
+    <circle cx="50" cy="22" r="15" fill="#e0472f"/>
+    <circle cx="26" cy="64" r="15" fill="#3b6fd4"/>
+    <circle cx="74" cy="64" r="15" fill="#f5a623"/>
+    <circle cx="50" cy="50" r="11" fill="#fffdf6"/>
+    <circle cx="50" cy="50" r="4.5" fill="#33312e" stroke="none"/>
+  </g>
+</svg>`;
+
+const spin = {
+  id: "spin",
+  name: "팽이 스핀!",
+  tag: "쓸어내려서 제일 빠르게 돌려라!",
+
+  stampOnTimeout: false,
+  duration: () => SPIN_START + SPIN_DUR + 2500,
+  hostSetup(ctx) {
+    return { startAt: ctx.playStart + SPIN_START };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, ended: false,
+      vel: 0, rot: 0, lastY: null, dragging: false, best: 0
+    };
+    stage.innerHTML = `
+      <div class="sp-wrap" id="spWrap">
+        <div class="sp-top">
+          <span class="sketch hud-chip">내 RPM: <b id="spRpm">0</b></span>
+          <span class="wa-count" id="spCount"></span>
+        </div>
+        <div class="sp-spinner" id="spSpinner">${SPINNER_SVG}</div>
+        <div class="sp-arrow">⬇ ⬇ ⬇</div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">🌀 화면을 아래로 미친 듯이 쓸어내려! 7초 뒤 RPM이 높을수록 승리!</div>`;
+    c.wrap = stage.querySelector("#spWrap");
+    c.spinner = stage.querySelector("#spSpinner");
+    c.rpmEl = stage.querySelector("#spRpm");
+    c.countEl = stage.querySelector("#spCount");
+
+    const down = e => { e.preventDefault(); c.dragging = true; c.lastY = e.clientY; };
+    const move = e => {
+      if (!c.dragging || !c.started || c.ended) return;
+      const dy = e.clientY - c.lastY;
+      c.lastY = e.clientY;
+      if (dy > 0) c.vel = Math.min(9000, c.vel + dy * 14); // 아래로 쓸수록 가속
+    };
+    const up = () => { c.dragging = false; c.lastY = null; };
+    c.wrap.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    c.cleanupWin = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    c.stopLoop = gameLoop((t, dt) => this._tick(ctx, dt));
+  },
+
+  _tick(ctx, dt) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || !state.startAt) return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); }
+    // 마찰 감속 + 회전
+    c.vel *= Math.exp(-dt / 1.6);
+    c.rot = (c.rot + c.vel * dt) % 360000;
+    c.spinner.style.transform = `rotate(${c.rot}deg)`;
+    const rpm = Math.round(c.vel / 6); // deg/s → rpm
+    c.rpmEl.textContent = rpm;
+    // 종료: 그 순간의 RPM을 한 번만 기록
+    if (!c.ended && t > state.startAt + SPIN_DUR) {
+      c.ended = true;
+      ctx.writeInput({ r: rpm });
+      c.countEl.textContent = "끝!! 손 떼!!";
+      sfx.whistle();
+    }
+  },
+
+  onState() {},
+  onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    if (state && state.startAt && ctx.now() > state.startAt + SPIN_DUR + 1200) return 1500;
+    return false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const played = players.filter(p => inputs[p] && typeof inputs[p].r === "number" && inputs[p].r > 0)
+      .sort((a, b) => inputs[b].r - inputs[a].r);
+    return tierOutcome(ctx, played, pid => inputs[pid].r + " RPM", "안 돌렸다… 💤");
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    if (c.cleanupWin) c.cleanupWin();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -2394,5 +2761,41 @@ wake.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "tug", "wake"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, tug, wake };
+avg.demo = () => {
+  const d = dmStage("dm-avg");
+  d.appendChild(dmAt(dmProp("dm-av-num1", "37"), "50%", "4%"));
+  d.appendChild(dmAt(dmProp("dm-av-num2", "62"), "50%", "4%"));
+  const track = dmAt(dmProp("dm-av-track"), "50%", "44%");
+  track.appendChild(dmProp("dm-av-knob"));
+  d.appendChild(track);
+  d.appendChild(dmAt(dmProp("dm-av-btn demo-btn", "제출!"), "50%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-av-hint", "모두의 평균에 제일 가까우면 승리!"), "50%", "86%"));
+  return d;
+};
+
+boss.demo = () => {
+  const d = dmStage("dm-boss");
+  const bar = dmAt(dmProp("dm-bs-hp"), "50%", "4%");
+  bar.appendChild(dmProp("dm-bs-hpfill"));
+  d.appendChild(bar);
+  d.appendChild(dmAt(dmProp("dm-bs-jar", "🏺"), "50%", "26%"));
+  d.appendChild(dmAt(dmProp("dm-bs-tap dm-bs-t1", "👆"), "28%", "48%"));
+  d.appendChild(dmAt(dmProp("dm-bs-tap dm-bs-t2", "👆"), "50%", "70%"));
+  d.appendChild(dmAt(dmProp("dm-bs-tap dm-bs-t3", "👆"), "72%", "48%"));
+  d.appendChild(dmAt(dmProp("dm-bs-boom", "💥"), "50%", "28%"));
+  d.appendChild(dmAt(dmProp("dm-bs-win", "막타 +3!!"), "50%", "84%"));
+  return d;
+};
+
+spin.demo = () => {
+  const d = dmStage("dm-spin");
+  const sp = dmAt(dmProp("dm-sp-spinner"), "50%", "8%");
+  sp.innerHTML = SPINNER_SVG;
+  d.appendChild(sp);
+  d.appendChild(dmAt(dmProp("dm-sp-hand", "👆"), "74%", "20%"));
+  d.appendChild(dmAt(dmProp("dm-sp-hint", "아래로 쓸어내려서 돌려!"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "tug", "wake", "avg", "boss", "spin"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, tug, wake, avg, boss, spin };

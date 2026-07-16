@@ -813,7 +813,7 @@ async function runResult(token) {
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록",
-  tug: "줄다리기", wake: "깨우기"
+  tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이"
 };
 
 // 최종 리더보드
@@ -1020,7 +1020,8 @@ async function hostEndPlay(byTimer) {
   if (endedRounds.has(rk)) return;
   endedRounds.add(rk);
   const g = GAMES[meta.curGame];
-  const { outcome, detail } = g.evaluate(makeCtx(), (gameCache && gameCache.inputs) || {}, (gameCache && gameCache.state) || null);
+  const res = g.evaluate(makeCtx(), (gameCache && gameCache.inputs) || {}, (gameCache && gameCache.state) || null);
+  const { outcome, detail } = res;
   const losers = Object.values(outcome).filter(v => v !== "win" && v !== "mid").length;
   const showStamp = !!byTimer && g.stampOnTimeout !== false;
   const resultMs = (showStamp ? 2800 : 1200) + 1900 + losers * 1150 + 5600;
@@ -1034,7 +1035,11 @@ async function hostEndPlay(byTimer) {
   const mult = meta.spicy ? 3 : 1; // 스파이시 라운드: 점수 3배 (+/- 모두)
   const delta = {};
   for (const pid of Object.keys(playersCache)) {
-    const d = (outcome[pid] === "win" ? 1 : outcome[pid] === "mid" ? 0 : -1) * mult;
+    // 게임이 자체 점수(delta)를 주면 그걸 사용 (예: 보스 막타 +3 독식)
+    const base = res.delta && res.delta[pid] !== undefined
+      ? res.delta[pid]
+      : (outcome[pid] === "win" ? 1 : outcome[pid] === "mid" ? 0 : -1);
+    const d = base * mult;
     delta[pid] = d;
     updates[`players/${pid}/score`] = (playersCache[pid].score || 0) + d;
   }
@@ -1163,6 +1168,24 @@ function botDrive() {
       if (state && state.startAt && t > state.startAt && t < state.startAt + 10000) {
         const cur = (inp && inp.n) || 0;
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { n: cur + 2 + Math.floor(Math.random() * 4) });
+      }
+    } else if (g === "avg") {
+      if (state && state.startAt && t > state.startAt && !inp && Math.random() < 0.15) {
+        net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { v: 20 + Math.floor(Math.random() * 61) });
+      }
+    } else if (g === "boss") {
+      if (state && state.startAt && t > state.startAt && !state.killer && state.hp > 0) {
+        const dmg = 2 + Math.floor(Math.random() * 4);
+        net.dbTxn(`rooms/${room}/game/state`, cur => {
+          if (!cur || cur.killer || cur.hp <= 0) return;
+          const nhp = cur.hp - dmg;
+          if (nhp <= 0) return Object.assign({}, cur, { hp: 0, killer: pid, killAt: t });
+          return Object.assign({}, cur, { hp: nhp });
+        }).catch(() => {});
+      }
+    } else if (g === "spin") {
+      if (state && state.startAt && t > state.startAt + 6200 && !inp) {
+        net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { r: 200 + Math.floor(Math.random() * 800) });
       }
     } else if (g === "block") {
       if (state && state.sub === "pick" && !(state.out || {})[pid]) {

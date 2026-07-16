@@ -875,6 +875,72 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes spicyFlame { from { transform: scale(1); } to { transform: scale(1.18) translateY(-5px); } }
 @keyframes spicyPulse { 50% { transform: scale(1.09); } }
 
+/* ── 눈치.. 숫자! ─────────────────────────── */
+.avg-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 0.5rem; }
+.avg-val {
+  font-size: clamp(3rem, 12vw, 4.6rem); font-weight: 700;
+  min-width: 2.6em; text-align: center; padding: 0.02em 0.3em;
+  font-variant-numeric: tabular-nums;
+}
+.avg-slider {
+  width: min(440px, 88vw);
+  appearance: none; -webkit-appearance: none;
+  height: 14px; border: 3px solid var(--ink); border-radius: 8px;
+  background: linear-gradient(90deg, #cfe6ff, #ffd9c9);
+  outline: none;
+}
+.avg-slider::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 34px; height: 34px;
+  background: var(--hl); border: 3px solid var(--ink);
+  border-radius: 48% 52% 46% 54% / 52% 48% 54% 46%;
+  cursor: pointer;
+}
+.avg-slider::-moz-range-thumb {
+  width: 30px; height: 30px;
+  background: var(--hl); border: 3px solid var(--ink);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.avg-slider:disabled { opacity: 0.5; }
+
+/* ── 보스 막타 치기! ──────────────────────── */
+.boss-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.8rem; padding: 0.5rem; position: relative; }
+.boss-hpbar { position: relative; width: min(460px, 90vw); height: 30px; overflow: hidden; }
+.boss-hpfill { height: 100%; width: 100%; background: linear-gradient(90deg, #58b647, #b5cc2e); transition: width 0.18s ease; }
+.boss-hpfill.low { background: linear-gradient(90deg, #e0472f, #f07f2d); }
+.boss-hptxt {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 1.05rem; text-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
+}
+.boss-jar {
+  font-size: clamp(6rem, 26vw, 9.5rem); line-height: 1;
+  cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation;
+  filter: drop-shadow(3px 5px 0 rgba(51, 49, 46, 0.25));
+}
+.boss-jar.boss-hit { animation: bossHit 0.16s cubic-bezier(0.3, 1.8, 0.4, 1); }
+@keyframes bossHit { 40% { transform: scale(0.93) rotate(-3deg); } }
+.boss-jar.boss-dead { animation: bossDead 0.6s cubic-bezier(0.2, 1.6, 0.4, 1) both; cursor: default; }
+@keyframes bossDead { from { transform: scale(0.4); } 60% { transform: scale(1.25); } }
+.boss-kill {
+  font-size: clamp(1.6rem, 7vw, 2.6rem); font-weight: 700; color: var(--red);
+  animation: bangPop 0.5s cubic-bezier(0.2, 2, 0.4, 1);
+  text-align: center;
+}
+.boss-kill b { text-decoration: underline wavy; }
+
+/* ── 팽이 스핀! ───────────────────────────── */
+.sp-wrap {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.6rem; padding: 0.5rem;
+  touch-action: none; /* 스와이프 중 화면 스크롤 방지 */
+}
+.sp-top { display: flex; gap: 1rem; align-items: center; min-height: 2.3em; }
+.sp-spinner { width: min(46vw, 240px); will-change: transform; }
+.sp-spinner svg { width: 100%; display: block; overflow: visible; }
+.sp-arrow { font-size: 1.5rem; color: var(--ink-soft); animation: spArrow 0.8s ease-in-out infinite; }
+@keyframes spArrow { 50% { transform: translateY(9px); opacity: 0.5; } }
+
 /* ── 게임 소개 데모 (그림 애니메이션) ───────── */
 .demo { position: relative; width: min(300px, 80vw); height: 150px; }
 .demo .char { position: absolute; }
@@ -989,6 +1055,44 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .dm-wk-tap { opacity: 0; animation: dmWkTap 2.4s infinite; }
 @keyframes dmWkTap { 0%, 18% { opacity: 0; transform: translate(-50%, 4px); } 22%, 32% { opacity: 1; transform: translate(-50%, -4px); } 40%, 100% { opacity: 0; transform: translate(-50%, 4px); } }
 .dm-wk-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* 눈치숫자: 슬라이더로 숫자 정해서 제출 */
+.dm-av-num1, .dm-av-num2 { font-size: 1.9rem; }
+.dm-av-num1 { animation: dmAvN1 3.2s steps(1, end) infinite; }
+.dm-av-num2 { opacity: 0; animation: dmAvN2 3.2s steps(1, end) infinite; }
+@keyframes dmAvN1 { 0%, 42% { opacity: 1; } 46%, 100% { opacity: 0; } }
+@keyframes dmAvN2 { 0%, 44% { opacity: 0; } 48%, 100% { opacity: 1; } }
+.dm-av-track { width: 170px; height: 10px; border: 3px solid var(--ink); border-radius: 6px; background: linear-gradient(90deg, #cfe6ff, #ffd9c9); }
+.dm-av-knob {
+  position: absolute; top: 50%; width: 24px; height: 24px;
+  background: var(--hl); border: 3px solid var(--ink); border-radius: 50%;
+  animation: dmAvKnob 3.2s ease-in-out infinite;
+}
+@keyframes dmAvKnob { 0% { left: 30%; transform: translate(-50%, -50%); } 42% { left: 30%; transform: translate(-50%, -50%); } 60%, 100% { left: 66%; transform: translate(-50%, -50%); } }
+.dm-av-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* 보스 막타: 다 같이 깎다가 마지막 한 방 */
+.dm-bs-hp { width: 190px; height: 16px; border: 3px solid var(--ink); border-radius: 8px; overflow: hidden; background: #ffe2da; }
+.dm-bs-hpfill { position: absolute; left: 0; top: 0; bottom: 0; transform: none; background: linear-gradient(90deg, #58b647, #b5cc2e); animation: dmBsHp 3.6s linear infinite; }
+@keyframes dmBsHp { 0% { width: 100%; } 78% { width: 4%; } 84%, 100% { width: 0%; } }
+.dm-bs-jar { font-size: 3.4rem; animation: dmBsJar 3.6s infinite; }
+@keyframes dmBsJar { 0%, 80% { opacity: 1; } 84%, 100% { opacity: 0; } }
+.dm-bs-tap { font-size: 1.4rem; animation: dmBsTap 0.4s ease-in-out infinite; }
+.dm-bs-t2 { animation-delay: 0.13s; }
+.dm-bs-t3 { animation-delay: 0.26s; }
+@keyframes dmBsTap { 50% { transform: translate(-50%, -6px); } 0%, 100% { transform: translate(-50%, 2px); } }
+.dm-bs-boom { font-size: 2.6rem; opacity: 0; animation: dmBsBoom 3.6s infinite; }
+@keyframes dmBsBoom { 0%, 80% { opacity: 0; transform: translateX(-50%) scale(0.4); } 85%, 94% { opacity: 1; transform: translateX(-50%) scale(1.2); } 100% { opacity: 0; } }
+.dm-bs-win { color: var(--red); font-size: 1.1rem; opacity: 0; animation: dmBsWin 3.6s infinite; }
+@keyframes dmBsWin { 0%, 82% { opacity: 0; } 88%, 100% { opacity: 1; } }
+
+/* 팽이: 쓸어내려서 돌리기 */
+.dm-sp-spinner { width: 86px; animation: dmSpSpin 1.1s linear infinite; }
+.dm-sp-spinner svg { width: 100%; display: block; }
+@keyframes dmSpSpin { to { transform: translateX(-50%) rotate(360deg); } }
+.dm-sp-hand { font-size: 1.5rem; animation: dmSpHand 0.55s ease-in infinite; }
+@keyframes dmSpHand { 0% { transform: translate(-50%, -6px); opacity: 1; } 100% { transform: translate(-50%, 34px); opacity: 0; } }
+.dm-sp-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {
