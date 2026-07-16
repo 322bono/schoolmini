@@ -92,6 +92,37 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   box-shadow: 2px 2px 0 rgba(51,49,46,0.2);
 }
 
+/* ── 로비 감정표현 ────────────────────────── */
+.emote-btn { right: 66px; }
+.emote-btn.cd, .emote-picker.cd .emote-opt { filter: grayscale(1); opacity: 0.45; pointer-events: none; }
+.emote-picker {
+  position: fixed; top: 64px; right: 12px; z-index: 60;
+  display: flex; gap: 0.3rem;
+  padding: 0.35rem 0.5rem;
+}
+.emote-picker[hidden] { display: none; }
+.emote-opt {
+  width: 44px; height: 44px;
+  font-size: 1.4rem; line-height: 1;
+  background: transparent; border: none;
+  transition: transform 0.12s;
+}
+.emote-opt:hover { transform: scale(1.25) rotate(-6deg); }
+
+.playground.quake { animation: pgQuake 0.65s linear; }
+@keyframes pgQuake {
+  10% { transform: translate(-5px, 3px) rotate(-0.4deg); }
+  25% { transform: translate(4px, -4px) rotate(0.4deg); }
+  40% { transform: translate(-4px, -2px) rotate(-0.3deg); }
+  55% { transform: translate(5px, 3px) rotate(0.3deg); }
+  70% { transform: translate(-3px, 2px) rotate(-0.2deg); }
+  85% { transform: translate(2px, -2px) rotate(0.1deg); }
+}
+
+/* ── 로비 채팅 ────────────────────────────── */
+.lobby-chat { width: 100%; max-width: 1060px; display: flex; gap: 0.4rem; }
+.lobby-chat .chat-input { flex: 1; font-size: 1.05rem; text-align: left; padding: 0.3em 0.7em; }
+
 .sketch-input {
   font-size: 1.35rem;
   text-align: center;
@@ -828,6 +859,22 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .wk-order { display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem; justify-content: center; }
 .wk-order .char { width: 40px; opacity: 0.5; transition: opacity 0.2s, transform 0.2s; }
 .wk-order .char.wk-active { opacity: 1; transform: scale(1.2) translateY(-4px); }
+
+/* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
+.char.em-spin .char-box {
+  animation: emSpin 0.9s cubic-bezier(0.4, 0.1, 0.5, 1) both;
+}
+@keyframes emSpin { to { transform: translateX(var(--emdx, 90px)) rotate(360deg); } }
+.char.em-flip .char-box {
+  animation: emFlip 1.6s ease-in-out both;
+  transform-origin: 50% 55%;
+}
+@keyframes emFlip {
+  0% { transform: rotate(0); }
+  16% { transform: rotate(180deg) translateY(-6%); }
+  84% { transform: rotate(180deg) translateY(-6%); }
+  100% { transform: rotate(360deg); }
+}
 
 /* ±0 표시 */
 .zeropop { color: var(--ink-soft); }

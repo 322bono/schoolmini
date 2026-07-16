@@ -30,6 +30,13 @@
   </svg>
 
   <button id="btnMute" class="icon-btn" title="소리 켜기/끄기">🔊</button>
+  <button id="btnEmote" class="icon-btn emote-btn" title="감정표현" style="display:none">😆</button>
+  <div id="emotePicker" class="emote-picker sketch" hidden>
+    <button class="emote-opt" data-k="1" title="점프">😄</button>
+    <button class="emote-opt" data-k="2" title="회전">🌀</button>
+    <button class="emote-opt" data-k="3" title="뒤집기">🙃</button>
+    <button class="emote-opt" data-k="4" title="FAHHHH">📢</button>
+  </div>
   <div id="toast-wrap"></div>
 
   <div id="app">
@@ -78,6 +85,10 @@
       </div>
       <div class="playground sketch alt2" id="playground">
         <span class="playground-hint">캐릭터들이 놀고 있어요…</span>
+      </div>
+      <div class="lobby-chat">
+        <input id="inpChat" class="sketch-input chat-input" maxlength="40" placeholder="친구들에게 한마디! (엔터로 전송)" autocomplete="off" />
+        <button id="btnChatSend" class="btn btn-sm">보내기</button>
       </div>
       <div class="lobby-bottom">
         <div class="colors-panel sketch">

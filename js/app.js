@@ -1,7 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
 import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
-import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm, playFahh } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -58,6 +58,9 @@ function showScreen(id, silent = false) {
   if (id !== "scr-final") stopMelody();
   // 타이틀·입장·로비에서는 BGM 재생
   setBgm(id === "scr-home" || id === "scr-entry" || id === "scr-lobby");
+  // 감정표현 버튼은 로비(대기실)에서만
+  $("btnEmote").style.display = id === "scr-lobby" ? "" : "none";
+  $("emotePicker").hidden = true;
   if (!silent) sfx.swoosh();
 }
 
@@ -170,6 +173,7 @@ function cleanupRoom(keepSaved = false) {
   stopMelody();
   room = null; meta = null; playersCache = {}; colorsCache = {}; gameCache = {}; historyCache = {};
   isHost = false; lastPhaseKey = ""; lastStatus = "";
+  emoteSeen = {}; saySeen = {};
 }
 
 // 같은 브라우저의 다른 탭이 이 방에 새로 들어오면(같은 UID),
@@ -231,6 +235,7 @@ function onPlayers() {
   renderPlayerList();
   renderColors();
   renderLobbyMeta();
+  handleEmotesAndChat();
 }
 
 function onGameData() {
@@ -370,6 +375,7 @@ function wanderStart() {
     const pg = $("playground");
     const W = Math.max(80, pg.clientWidth - 78), H = Math.max(60, pg.clientHeight - 105);
     for (const w of Object.values(wander)) {
+      if (w.emoteUntil && t < w.emoteUntil) continue; // 감정표현 중엔 배회 정지
       if (w.moving) {
         const dx = w.tx - w.x, dy = w.ty - w.y;
         const d = Math.hypot(dx, dy);
@@ -399,6 +405,116 @@ function wanderStop() {
   wanderRaf = 0;
   for (const w of Object.values(wander)) w.el.remove();
   wander = {};
+}
+
+// ── 로비 감정표현 + 채팅 ─────────────────────
+const EMOTE_CD_MS = 5000;
+let emoteSeen = {};   // pid → 마지막으로 재생한 emote.t
+let saySeen = {};     // pid → 마지막으로 표시한 say.t
+let emoteCdUntil = 0;
+let lastChatSent = 0;
+
+function handleEmotesAndChat() {
+  if (curScreen !== "scr-lobby") return;
+  const nowMs = net.now();
+  for (const [pid, p] of Object.entries(playersCache)) {
+    const em = p.emote;
+    if (em && em.t && emoteSeen[pid] !== em.t) {
+      // 입장 전에 쌓여 있던 낡은 값(8초 초과)은 기록만 하고 재생 안 함
+      const fresh = emoteSeen[pid] !== undefined || nowMs - em.t < 8000;
+      emoteSeen[pid] = em.t;
+      if (fresh) playEmote(pid, em.k);
+    }
+    const sy = p.say;
+    if (sy && sy.t && saySeen[pid] !== sy.t) {
+      const fresh = saySeen[pid] !== undefined || nowMs - sy.t < 8000;
+      saySeen[pid] = sy.t;
+      if (fresh && wander[pid]) charSay(wander[pid].el, String(sy.m || "").slice(0, 40), 3500);
+    }
+  }
+}
+
+function playEmote(pid, k) {
+  const w = wander[pid];
+  if (!w) return;
+  const el = w.el;
+  const t = performance.now();
+  if (k === 1) {
+    // 웃으면서 점프 (우승 모션)
+    w.emoteUntil = t + 1300;
+    w.moving = false;
+    setFace(el, "happy");
+    setMotion(el, "jump");
+    sfx.pop();
+    setTimeout(() => { if (wander[pid]) { setFace(el, "normal"); setMotion(el, "idle"); } }, 1300);
+  } else if (k === 2) {
+    // 풍차처럼 360도 돌며 오른쪽으로 이동
+    const pg = $("playground");
+    const maxX = Math.max(80, pg.clientWidth - 80);
+    const dx = Math.min(90, Math.max(0, maxX - w.x));
+    w.emoteUntil = t + 950;
+    w.moving = false;
+    setMotion(el, "none");
+    el.style.setProperty("--emdx", dx + "px");
+    el.classList.add("em-spin");
+    sfx.swoosh();
+    setTimeout(() => {
+      el.classList.remove("em-spin");
+      if (wander[pid]) {
+        w.x += dx;
+        el.style.left = w.x + "px";
+        setMotion(el, "idle");
+      }
+    }, 950);
+  } else if (k === 3) {
+    // 물구나무 — 머리가 바닥에
+    w.emoteUntil = t + 1650;
+    w.moving = false;
+    setMotion(el, "none");
+    el.classList.add("em-flip");
+    sfx.thud();
+    setTimeout(() => {
+      el.classList.remove("em-flip");
+      if (wander[pid]) setMotion(el, "idle");
+    }, 1650);
+  } else if (k === 4) {
+    // FAHHHH — 효과음 + 대기실 진동
+    w.emoteUntil = t + 800;
+    w.moving = false;
+    setFace(el, "shock");
+    setMotion(el, "shout");
+    playFahh();
+    const pg = $("playground");
+    pg.classList.remove("quake");
+    void pg.offsetWidth;
+    pg.classList.add("quake");
+    setTimeout(() => pg.classList.remove("quake"), 700);
+    setTimeout(() => { if (wander[pid]) { setFace(el, "normal"); setMotion(el, "idle"); } }, 900);
+  }
+}
+
+function sendEmote(k) {
+  if (!room || curScreen !== "scr-lobby") return;
+  const nowMs = Date.now();
+  if (nowMs < emoteCdUntil) return;
+  emoteCdUntil = nowMs + EMOTE_CD_MS;
+  $("btnEmote").classList.add("cd");
+  $("emotePicker").classList.add("cd");
+  setTimeout(() => { $("btnEmote").classList.remove("cd"); $("emotePicker").classList.remove("cd"); }, EMOTE_CD_MS);
+  $("emotePicker").hidden = true;
+  net.dbUpdate(`rooms/${room}/players/${UID}/emote`, { k, t: net.now() });
+}
+
+function sendChat() {
+  if (!room || curScreen !== "scr-lobby") return;
+  const inp = $("inpChat");
+  const msg = inp.value.trim().slice(0, 40);
+  if (!msg) return;
+  const nowMs = Date.now();
+  if (nowMs - lastChatSent < 1200) return; // 도배 방지
+  lastChatSent = nowMs;
+  inp.value = "";
+  net.dbUpdate(`rooms/${room}/players/${UID}/say`, { m: msg, t: net.now() });
 }
 
 // 방장: 게임 시작
@@ -1116,6 +1232,25 @@ $("btnRoundPlus").addEventListener("click", () => {
   sfx.click();
   net.dbUpdate(`rooms/${room}/meta`, { rounds: Math.min(10, (meta.rounds || 4) + 1) });
 });
+// 감정표현 버튼 + 피커
+$("btnEmote").addEventListener("click", () => {
+  if (Date.now() < emoteCdUntil) return;
+  sfx.click();
+  $("emotePicker").hidden = !$("emotePicker").hidden;
+});
+document.querySelectorAll(".emote-opt").forEach(b => {
+  b.addEventListener("click", () => sendEmote(Number(b.dataset.k)));
+});
+document.addEventListener("pointerdown", e => {
+  // 피커 밖을 누르면 닫기
+  const pk = $("emotePicker");
+  if (!pk.hidden && !pk.contains(e.target) && e.target !== $("btnEmote")) pk.hidden = true;
+});
+
+// 로비 채팅
+$("btnChatSend").addEventListener("click", sendChat);
+$("inpChat").addEventListener("keydown", e => { if (e.key === "Enter") sendChat(); });
+
 $("btnStart").addEventListener("click", () => { sfx.tada(); hostStartGame(); });
 $("btnLeaveLobby").addEventListener("click", () => { sfx.click(); leaveToHome(); });
 $("btnFinalLeave").addEventListener("click", () => { sfx.click(); leaveToHome(); });

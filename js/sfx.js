@@ -63,6 +63,16 @@ export function playDrumroll() {
   } catch { /* noop */ }
 }
 
+/** FAHHHH (로비 감정표현 4번) */
+export function playFahh() {
+  if (muted) return;
+  try {
+    const a = new Audio("assets/fahh.mp3");
+    a.volume = 0.8;
+    a.play().catch(() => {});
+  } catch { /* noop */ }
+}
+
 function osc({ type = "sine", freq = 440, to = null, dur = 0.15, vol = 0.5, delay = 0, curve = "exp" }) {
   try {
     const c = ac();
