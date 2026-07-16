@@ -455,7 +455,7 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes cardPop { from { transform: scale(0.6) rotate(-3deg); opacity: 0; } }
 .intro-name { font-size: clamp(2.2rem, 8vw, 3.2rem); line-height: 1.1; }
 .intro-tag { font-size: 1.45rem; color: var(--red); margin-top: 0.35rem; }
-.intro-desc { font-size: 1.12rem; color: var(--ink-soft); margin-top: 0.9rem; line-height: 1.45; }
+.intro-demo { display: flex; justify-content: center; margin-top: 0.8rem; }
 .intro-timer { margin-top: 1rem; font-size: 1rem; color: var(--ink-soft); }
 
 /* 결과 오버레이 */
@@ -613,9 +613,9 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .screen.enter { animation: scrIn 0.45s cubic-bezier(0.2, 1.2, 0.35, 1); }
 .btn-action { touch-action: none; }
 
-.intro-name, .intro-tag, .intro-desc, .intro-timer { animation: introUp 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.intro-name, .intro-tag, .intro-demo, .intro-timer { animation: introUp 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 .intro-tag { animation-delay: 0.35s; }
-.intro-desc { animation-delay: 0.7s; }
+.intro-demo { animation-delay: 0.7s; }
 .intro-timer { animation-delay: 1.15s; }
 @keyframes introUp { from { opacity: 0; transform: translateY(16px); } }
 
@@ -859,6 +859,136 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .wk-order { display: flex; flex-wrap: wrap; gap: 0.35rem 0.55rem; justify-content: center; }
 .wk-order .char { width: 40px; opacity: 0.5; transition: opacity 0.2s, transform 0.2s; }
 .wk-order .char.wk-active { opacity: 1; transform: scale(1.2) translateY(-4px); }
+
+/* ── 스파이시 라운드 ──────────────────────── */
+#ovl-spicy { background: rgba(94, 14, 6, 0.93); }
+#ovl-spicy.show { animation: pgQuake 0.65s linear; }
+.spicy-wrap { text-align: center; animation: spicySlam 0.55s cubic-bezier(0.2, 1.8, 0.4, 1) both; }
+.spicy-fire { font-size: 3rem; animation: spicyFlame 0.5s ease-in-out infinite alternate; }
+.spicy-title {
+  font-size: clamp(2.6rem, 11vw, 4.6rem); font-weight: 700; line-height: 1.05;
+  color: #fff; letter-spacing: 0.04em;
+  text-shadow: 3px 4px 0 #a02010, 0 0 28px rgba(255, 120, 40, 0.8);
+}
+.spicy-sub { font-size: 1.6rem; color: #ffd76e; margin-top: 0.4rem; animation: spicyPulse 0.8s ease-in-out infinite; }
+@keyframes spicySlam { from { transform: scale(3) rotate(-7deg); opacity: 0; } }
+@keyframes spicyFlame { from { transform: scale(1); } to { transform: scale(1.18) translateY(-5px); } }
+@keyframes spicyPulse { 50% { transform: scale(1.09); } }
+
+/* ── 게임 소개 데모 (그림 애니메이션) ───────── */
+.demo { position: relative; width: min(300px, 80vw); height: 150px; }
+.demo .char { position: absolute; }
+.demo-prop { position: absolute; transform: translateX(-50%); font-weight: 700; white-space: nowrap; }
+.demo-prop.demo-btn {
+  padding: 0.05em 0.6em; border: 3px solid var(--ink); border-radius: var(--r1);
+  background: var(--red); color: #fff; font-size: 1.05rem;
+}
+
+/* 눈치게임: 혼자 외치면 성공 */
+.dm-n-hero .char-box { animation: dmNJump 3.4s ease-in-out infinite; }
+@keyframes dmNJump { 0%, 38%, 68%, 100% { transform: none; } 46%, 58% { transform: translateY(-26px); } }
+.dm-n-bubble { font-size: 1.2rem; color: var(--red); opacity: 0; animation: dmNBub 3.4s infinite; }
+@keyframes dmNBub { 0%, 40% { opacity: 0; transform: translateX(-50%) scale(0.6); } 48%, 72% { opacity: 1; transform: translateX(-50%) scale(1); } 80%, 100% { opacity: 0; transform: translateX(-50%) scale(1); } }
+.dm-n-ok { color: var(--green); font-size: 1.05rem; opacity: 0; animation: dmNOk 3.4s infinite; }
+@keyframes dmNOk { 0%, 55% { opacity: 0; } 62%, 88% { opacity: 1; } 96%, 100% { opacity: 0; } }
+
+/* 무궁화: 안 볼 때 전진, 볼 때 정지 */
+.dm-mg-line { width: 4px; height: 110px; background: var(--red); opacity: 0.7; }
+.dm-mg-tagger .char-box svg { animation: dmMgFace 4s steps(1, end) infinite; }
+@keyframes dmMgFace { 0%, 45% { transform: scaleX(-1); } 50%, 95% { transform: scaleX(1); } 100% { transform: scaleX(-1); } }
+.dm-mg-runner { animation: dmMgRun 4s linear infinite; }
+@keyframes dmMgRun { 0% { left: 6%; opacity: 1; } 45%, 95% { left: 42%; opacity: 1; } 100% { left: 42%; opacity: 0; } }
+.dm-mg-alert { color: var(--red); font-size: 1.05rem; opacity: 0; animation: dmMgAlert 4s steps(1, end) infinite; }
+@keyframes dmMgAlert { 0%, 48% { opacity: 0; } 52%, 92% { opacity: 1; } 96%, 100% { opacity: 0; } }
+
+/* 빨리 집어: 신호 뜨면 탭 */
+.dm-g-wait { font-size: 1.3rem; color: var(--ink-soft); animation: dmGWait 3s steps(1, end) infinite; }
+@keyframes dmGWait { 0%, 48% { opacity: 1; } 52%, 100% { opacity: 0; } }
+.dm-g-now { font-size: 1.6rem; color: var(--red); opacity: 0; animation: dmGNow 3s infinite; }
+@keyframes dmGNow { 0%, 50% { opacity: 0; transform: translateX(-50%) scale(0.5); } 55%, 90% { opacity: 1; transform: translateX(-50%) scale(1); } 100% { opacity: 0; transform: translateX(-50%) scale(1); } }
+.dm-g-tap, .dm-c-tap, .dm-m-tap, .dm-w-tap, .dm-wk-tap { font-size: 1.5rem; }
+.dm-g-tap { animation: dmGTap 3s infinite; }
+@keyframes dmGTap { 0%, 52% { transform: translate(-50%, 10px); } 58%, 64% { transform: translate(-50%, -6px); } 70%, 100% { transform: translate(-50%, 10px); } }
+
+/* 초세기: 시계가 숨은 뒤 감으로 멈춰 */
+.dm-c-open { font-size: 1.35rem; animation: dmCOpen 3.6s steps(1, end) infinite; }
+@keyframes dmCOpen { 0%, 38% { opacity: 1; } 42%, 100% { opacity: 0; } }
+.dm-c-hidden { font-size: 1.35rem; color: var(--ink-soft); opacity: 0; animation: dmCHid 3.6s steps(1, end) infinite; }
+@keyframes dmCHid { 0%, 40% { opacity: 0; } 44%, 100% { opacity: 1; } }
+.dm-c-tap { animation: dmCTap 3.6s infinite; }
+@keyframes dmCTap { 0%, 64% { transform: translate(-50%, 10px); } 70%, 76% { transform: translate(-50%, -6px); } 82%, 100% { transform: translate(-50%, 10px); } }
+
+/* 두더지: 튀어나오면 제일 빨리 탭 */
+.dm-w-hole { width: 64px; height: 26px; background: #6b5335; border: 3px solid var(--ink); border-radius: 50%; opacity: 0.9; }
+.dm-w-molewrap { width: 56px; height: 58px; overflow: hidden; display: flex; justify-content: center; align-items: flex-end; }
+.dm-w-molewrap .char { position: static; animation: dmWMole 2.8s ease-in-out infinite; }
+@keyframes dmWMole { 0%, 12% { transform: translateY(105%); } 25%, 55% { transform: translateY(6%); } 68%, 100% { transform: translateY(105%); } }
+.dm-w-tap { opacity: 0; animation: dmWTap 2.8s infinite; }
+@keyframes dmWTap { 0%, 30% { opacity: 0; transform: translate(-50%, 6px); } 38%, 50% { opacity: 1; transform: translate(-50%, -4px); } 60%, 100% { opacity: 0; transform: translate(-50%, 6px); } }
+.dm-w-pop { color: var(--green); font-size: 1rem; opacity: 0; animation: dmWPop 2.8s infinite; }
+@keyframes dmWPop { 0%, 44% { opacity: 0; } 50%, 80% { opacity: 1; } 90%, 100% { opacity: 0; } }
+
+/* 타이핑: 단어를 빨리 쳐서 획득 */
+.dm-t-card { font-size: 1.7rem; border: 3px solid var(--ink); border-radius: var(--r1); background: var(--paper-2); padding: 0.05em 0.6em; }
+.dm-t-inputline {
+  width: 160px; height: 2.1em; border: 3px solid var(--ink); border-radius: var(--r2);
+  background: #fff; display: flex; align-items: center; padding: 0 0.5em; overflow: hidden;
+}
+.dm-t-typed { position: static; transform: none; font-size: 1.25rem; white-space: nowrap; overflow: hidden; animation: dmTType 3.4s steps(3, end) infinite; }
+@keyframes dmTType { 0%, 15% { width: 0; } 55%, 100% { width: 3.6em; } }
+.dm-t-ok { color: var(--green); font-size: 1rem; opacity: 0; animation: dmTOk 3.4s infinite; }
+@keyframes dmTOk { 0%, 58% { opacity: 0; } 66%, 92% { opacity: 1; } 100% { opacity: 0; } }
+
+/* 폭탄: 폭탄이 돌다가 펑 */
+.dm-b-bomb { font-size: 1.7rem; animation: dmBBomb 4s ease-in-out infinite; }
+@keyframes dmBBomb {
+  0%, 18% { left: 16%; transform: translate(-50%, 0); }
+  24% { transform: translate(-50%, -18px); }
+  30%, 48% { left: 46%; transform: translate(-50%, 0); }
+  54% { transform: translate(-50%, -18px); }
+  60%, 100% { left: 76%; transform: translate(-50%, 0); }
+}
+.dm-b-boom { font-size: 2rem; opacity: 0; animation: dmBBoom 4s infinite; }
+@keyframes dmBBoom { 0%, 78% { opacity: 0; transform: translateX(-50%) scale(0.4); } 84%, 92% { opacity: 1; transform: translateX(-50%) scale(1.15); } 100% { opacity: 0; transform: translateX(-50%) scale(1.15); } }
+
+/* 연타: 미친 듯이 탭 */
+.dm-m-tap { animation: dmMTap 0.38s ease-in-out infinite; }
+@keyframes dmMTap { 0%, 100% { transform: translate(-50%, 2px); } 50% { transform: translate(-50%, -7px); } }
+.dm-m-p1, .dm-m-p2 { color: var(--blue); font-size: 1rem; opacity: 0; animation: dmMFloat 1.2s linear infinite; }
+.dm-m-p2 { animation-delay: 0.6s; }
+@keyframes dmMFloat { 0% { opacity: 0; transform: translate(-50%, 8px); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -22px); } }
+
+/* 눈치블록: 많이 모인 타일이 탈락 */
+.dm-bk-tile { width: 84px; height: 52px; border: 3px solid var(--ink); border-radius: var(--r1); }
+.dm-bk-left { background: #f07f2d; animation: dmBkFlash 4s steps(1, end) infinite; }
+.dm-bk-right { background: #58b647; }
+@keyframes dmBkFlash { 0%, 55% { filter: none; } 60%, 90% { filter: brightness(0.55) saturate(2); } 100% { filter: none; } }
+.dm-bk-fall1 .char-box, .dm-bk-fall2 .char-box { animation: dmBkFall 4s ease-in infinite; }
+@keyframes dmBkFall { 0%, 58% { transform: none; opacity: 1; } 70%, 88% { transform: translateY(34px) rotate(14deg); opacity: 0.25; } 96%, 100% { transform: none; opacity: 1; } }
+.dm-bk-boom { color: var(--red); font-size: 1rem; opacity: 0; animation: dmBkBoom 4s infinite; }
+@keyframes dmBkBoom { 0%, 56% { opacity: 0; } 62%, 88% { opacity: 1; } 94%, 100% { opacity: 0; } }
+
+/* 줄다리기: 줄을 우리 쪽으로 */
+.dm-tg-rope { width: 62%; height: 5px; background: #b58a4a; border-radius: 3px; }
+.dm-tg-knot { font-size: 1.15rem; animation: dmTgKnot 3.6s ease-in-out infinite; }
+@keyframes dmTgKnot { 0% { left: 50%; } 25% { left: 56%; } 55% { left: 44%; } 85%, 100% { left: 34%; } }
+.dm-tg-l .char-box { animation: dmTgPullL 0.5s ease-in-out infinite; }
+.dm-tg-r .char-box { animation: dmTgPullR 0.5s ease-in-out infinite; }
+@keyframes dmTgPullL { 50% { transform: rotate(-9deg) translateX(-3px); } }
+@keyframes dmTgPullR { 50% { transform: rotate(9deg) translateX(3px); } }
+.dm-tg-win { font-size: 1.4rem; opacity: 0; animation: dmTgWin 3.6s infinite; }
+@keyframes dmTgWin { 0%, 80% { opacity: 0; transform: translateX(-50%) scale(0.5); } 88%, 100% { opacity: 1; transform: translateX(-50%) scale(1); } }
+
+/* 조심히 깨우기: 초록 구간에서 멈춰 */
+.dm-wk-dog { font-size: 2.2rem; animation: wkBob 1.8s ease-in-out infinite; }
+.dm-wk-zzz { font-size: 1.1rem; animation: wkZzz 1.6s ease-in-out infinite; }
+.dm-wk-bar { width: 190px; height: 30px; border: 3px solid var(--ink); border-radius: 10px; background: rgba(224, 71, 47, 0.45); overflow: hidden; }
+.dm-wk-green { position: absolute; left: 30%; width: 40%; top: 0; bottom: 0; transform: none; background: #8ed07e; }
+.dm-wk-needle { position: absolute; top: -3px; bottom: -3px; width: 4px; transform: none; background: var(--ink); animation: dmWkNeedle 2.4s ease-in-out infinite; }
+@keyframes dmWkNeedle { 0% { left: 6%; } 50% { left: 92%; } 100% { left: 6%; } }
+.dm-wk-tap { opacity: 0; animation: dmWkTap 2.4s infinite; }
+@keyframes dmWkTap { 0%, 18% { opacity: 0; transform: translate(-50%, 4px); } 22%, 32% { opacity: 1; transform: translate(-50%, -4px); } 40%, 100% { opacity: 0; transform: translate(-50%, 4px); } }
+.dm-wk-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {

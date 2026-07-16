@@ -1,7 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
 import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
-import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm, playFahh } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, startMelody, stopMelody, setBgm, playFahh, playGong, setRoundMusic, stopRoundMusic } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -11,6 +11,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // 페이즈 길이 — 너무 빠르게 넘어가지 않도록 여유 있게
 const SLOT_MS = 7800;
 const INTRO_MS = 8400;
+const SPICY_MS = 3800;
+const SPICY_CHANCE = 0.22; // 라운드마다 스파이시(점수 3배) 확률
 
 // ── 전역 상태 ────────────────────────────────
 let UID = null;
@@ -171,6 +173,7 @@ function cleanupRoom(keepSaved = false) {
   wanderStop();
   if (!keepSaved) localStorage.removeItem("sm_room");
   stopMelody();
+  stopRoundMusic();
   room = null; meta = null; playersCache = {}; colorsCache = {}; gameCache = {}; historyCache = {};
   isHost = false; lastPhaseKey = ""; lastStatus = "";
   emoteSeen = {}; saySeen = {};
@@ -212,6 +215,7 @@ function onMeta() {
   if (meta.status === "lobby") {
     if (lastStatus !== "lobby") {
       unmountGame();
+      stopRoundMusic();
       hideOverlays();
       showScreen("scr-lobby");
     }
@@ -220,7 +224,7 @@ function onMeta() {
     if (lastStatus !== "playing") showScreen("scr-game");
     handlePhase();
   } else if (meta.status === "final") {
-    if (lastStatus !== "final") showScreen("scr-final");
+    if (lastStatus !== "final") { stopRoundMusic(); showScreen("scr-final"); }
     renderFinal();
   }
   lastStatus = meta.status;
@@ -527,14 +531,16 @@ async function hostStartGame() {
   while (seq.length < n) seq = seq.concat(shuffleArr(GAME_IDS));
   seq = seq.slice(0, n);
   endedRounds = new Set();
+  const spicy = Math.random() < SPICY_CHANCE;
   await net.dbUpdate(`rooms/${room}`, {
     "meta/status": "playing",
     "meta/rounds": n,
     "meta/curRound": 1,
     "meta/seq": seq,
     "meta/curGame": seq[0],
-    "meta/phase": "slot",
-    "meta/phaseEnd": net.now() + SLOT_MS,
+    "meta/spicy": spicy,
+    "meta/phase": spicy ? "spicy" : "slot",
+    "meta/phaseEnd": net.now() + (spicy ? SPICY_MS : SLOT_MS),
     "meta/timeout": null,
     game: null,
     history: null
@@ -559,11 +565,12 @@ function hideOverlays() {
   $("ovl-slot").classList.remove("show");
   $("ovl-intro").classList.remove("show");
   $("ovl-result").classList.remove("show");
+  $("ovl-spicy").classList.remove("show");
 }
 
 function handlePhase() {
   const key = phaseKeyOf(meta);
-  $("hudRound").textContent = `라운드 ${meta.curRound}/${meta.rounds}`;
+  $("hudRound").textContent = `라운드 ${meta.curRound}/${meta.rounds}` + (meta.spicy ? " 🌶️×3" : "");
   $("hudCode").textContent = room;
   if (key === lastPhaseKey) return;
   lastPhaseKey = key;
@@ -572,8 +579,15 @@ function handlePhase() {
   cancelAnimationFrame(slotRaf);
 
   switch (meta.phase) {
+    case "spicy":
+      unmountGame();
+      stopRoundMusic();
+      hideOverlays();
+      runSpicy();
+      break;
     case "slot":
       unmountGame();
+      stopRoundMusic();
       hideOverlays();
       runSlot();
       break;
@@ -582,14 +596,29 @@ function handlePhase() {
       break;
     case "play":
       hideOverlays();
+      // 이번 라운드 음악 예약 — 각 게임이 카운트다운 끝나는 순간 gameStartFx()로 시작
+      setRoundMusic(meta.spicy ? "apex" : "sunny");
       mountGame();
       break;
     case "result":
       unmountGame();
+      stopRoundMusic();
       runResult(key);
       break;
   }
 }
+
+// 스파이시 라운드 등장 연출
+function runSpicy() {
+  const ovl = $("ovl-spicy");
+  ovl.classList.remove("show");
+  void ovl.offsetWidth;
+  ovl.classList.add("show");
+  sfx.bbam();
+  vibrate(250);
+}
+
+function vibrate(ms) { try { navigator.vibrate && navigator.vibrate(ms); } catch { /* noop */ } }
 
 function mountGame() {
   const g = GAMES[meta.curGame];
@@ -655,7 +684,9 @@ function runIntro() {
   const g = GAMES[meta.curGame];
   $("introName").textContent = g.name;
   $("introTag").textContent = `' ${g.tag} '`;
-  $("introDesc").innerHTML = g.desc;
+  const demoWrap = $("introDemo");
+  demoWrap.innerHTML = "";
+  if (g.demo) demoWrap.appendChild(g.demo());
   $("ovl-intro").classList.add("show");
   sfx.pop();
 }
@@ -682,6 +713,7 @@ function spawnPoof(el) {
 // 결과 연출: 시간초과 도장 → 탈락자 하나씩 소멸 → 승자 +1
 async function runResult(token) {
   resultToken = token;
+  const quiet = !!(meta && meta.spicy); // 스파이시 라운드는 결과 발표 무음
   const ovl = $("ovl-result");
   const stamp = $("stampTimeover");
   const field = $("resultField");
@@ -691,6 +723,7 @@ async function runResult(token) {
   scoreEl.innerHTML = "";
   $("resultTitle").textContent = `${GAMES[meta.curGame].name} — 결과!`;
   ovl.classList.add("show");
+  if (!quiet) playGong(); // 결과 발표 공소리
 
   // 결과 데이터 대기 (호스트 쓰기 반영 레이스 대비)
   let waited = 0;
@@ -701,7 +734,7 @@ async function runResult(token) {
 
   if (meta && meta.timeout) {
     stamp.style.display = "";
-    sfx.timeover();
+    if (!quiet) sfx.timeover();
     await sleep(2400);
     if (resultToken !== token) return;
   }
@@ -735,7 +768,7 @@ async function runResult(token) {
     if (resultToken !== token) return;
     setMotion(el, "dissolve");
     spawnPoof(el);
-    sfx.poof();
+    if (!quiet) sfx.poof();
     await sleep(520);
   }
   await sleep(800);
@@ -750,8 +783,7 @@ async function runResult(token) {
     el.appendChild(zero);
   }
   if (winners.length) {
-    sfx.win();
-    sfx.coin();
+    if (!quiet) { sfx.win(); sfx.coin(); }
     for (const pid of winners) {
       const el = charMap[pid];
       setFace(el, "happy");
@@ -947,6 +979,9 @@ async function hostAdvance(key) {
   if (net.now() < (meta.phaseEnd || 0) - 30) { hostSchedule(); return; }
   try {
     switch (meta.phase) {
+      case "spicy":
+        await net.dbUpdate(`rooms/${room}/meta`, { phase: "slot", phaseEnd: net.now() + SLOT_MS });
+        break;
       case "slot":
         await net.dbUpdate(`rooms/${room}/meta`, { phase: "intro", phaseEnd: net.now() + INTRO_MS });
         break;
@@ -996,9 +1031,10 @@ async function hostEndPlay(byTimer) {
     "meta/phaseEnd": net.now() + resultMs,
     "meta/timeout": showStamp
   };
+  const mult = meta.spicy ? 3 : 1; // 스파이시 라운드: 점수 3배 (+/- 모두)
   const delta = {};
   for (const pid of Object.keys(playersCache)) {
-    const d = outcome[pid] === "win" ? 1 : outcome[pid] === "mid" ? 0 : -1;
+    const d = (outcome[pid] === "win" ? 1 : outcome[pid] === "mid" ? 0 : -1) * mult;
     delta[pid] = d;
     updates[`players/${pid}/score`] = (playersCache[pid].score || 0) + d;
   }
@@ -1010,12 +1046,14 @@ async function hostEndPlay(byTimer) {
 async function hostAfterResult() {
   if (meta.curRound < meta.rounds) {
     const next = meta.curRound + 1;
+    const spicy = Math.random() < SPICY_CHANCE;
     await net.dbUpdate(`rooms/${room}`, {
       game: null,
       "meta/curRound": next,
       "meta/curGame": (meta.seq || GAME_IDS)[(next - 1) % (meta.seq || GAME_IDS).length],
-      "meta/phase": "slot",
-      "meta/phaseEnd": net.now() + SLOT_MS,
+      "meta/spicy": spicy,
+      "meta/phase": spicy ? "spicy" : "slot",
+      "meta/phaseEnd": net.now() + (spicy ? SPICY_MS : SLOT_MS),
       "meta/timeout": null
     });
   } else {
@@ -1139,7 +1177,7 @@ function botDrive() {
       if (v.fin || v.caught) continue;
       const cy = state.cycle;
       if (cy && cy.mode === "look") {
-        if (t >= cy.start + 250 && t <= cy.end && Math.random() < 0.12) {
+        if (t >= cy.start + 600 && t <= cy.end && Math.random() < 0.12) {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { caught: 1 });
         }
       } else {
@@ -1260,7 +1298,7 @@ $("btnAgain").addEventListener("click", async () => {
   if (!isHost) return;
   sfx.click();
   finalShown = false;
-  const updates = { "meta/status": "lobby", "meta/phase": null, "meta/curRound": 0, game: null, history: null, "meta/timeout": null };
+  const updates = { "meta/status": "lobby", "meta/phase": null, "meta/curRound": 0, game: null, history: null, "meta/timeout": null, "meta/spicy": null };
   for (const pid of Object.keys(playersCache)) updates[`players/${pid}/score`] = 0;
   await net.dbUpdate(`rooms/${room}`, updates);
 });

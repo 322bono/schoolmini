@@ -9,7 +9,7 @@
 //   hostEarlyEnd(ctx, i, s)    : 조기 종료 조건 → false | 지연ms
 //   evaluate(ctx, i, s)        : {outcome:{uid:'win'|'lose'}, detail:{uid:문구}}
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { sfx, playDrumroll } from "./sfx.js";
+import { sfx, playDrumroll, cdTick, gameStartFx } from "./sfx.js";
 
 // ── 공통 헬퍼 ────────────────────────────────
 function shuffle(arr) {
@@ -180,6 +180,7 @@ const nunchi = {
       ctx.writeInput({ t: ctx.tsSentinel() });
       status.innerHTML = "외쳤다!! 아무도 같이 안 눌렀길… 🙏";
     });
+    gameStartFx();
   },
   onState() {},
   // 다른 사람이 언제 눌렀는지는 결과 전까지 비밀 — 실시간 표시 없음
@@ -363,7 +364,8 @@ const mugunghwa = {
 
     const cy = state.cycle;
     const nowT = ctx.now();
-    const inLook = cy && cy.mode === "look" && nowT >= cy.start + 250 && nowT <= cy.end;
+    // 돌아본 직후 600ms는 유예 — 네트워크 지연으로 억울하게 잡히는 것 방지
+    const inLook = cy && cy.mode === "look" && nowT >= cy.start + 600 && nowT <= cy.end;
 
     if (c.moving) {
       if (inLook) {
@@ -415,6 +417,7 @@ const mugunghwa = {
       const tp = ctx.players()[state.tagger];
       c.roulName.textContent = "🚨 " + (tp ? tp.nick : "?") + " 🚨";
       sfx.bbam();
+      gameStartFx();
       setTimeout(() => { if (c.roulette) c.roulette.remove(); }, 1200);
       if (state.tagger !== ctx.uid) {
         c.btn.disabled = false;
@@ -715,9 +718,9 @@ const grab = {
     const cdEnd = ctx.playStart + 3000;
     if (t < cdEnd) {
       const n = Math.ceil((cdEnd - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.msg.className = "grab-count"; c.msg.textContent = n; sfx.beep(); }
+      if (n !== c.lastCount) { c.lastCount = n; c.msg.className = "grab-count"; c.msg.textContent = n; cdTick(); }
     } else if (t < state.signalAt) {
-      if (c.msg.textContent !== "・・・") { c.msg.className = "grab-wait"; c.msg.textContent = "・・・"; }
+      if (c.msg.textContent !== "・・・") { c.msg.className = "grab-wait"; c.msg.textContent = "・・・"; gameStartFx(); }
     } else if (!c.signalShown) {
       c.signalShown = true;
       c.msg.className = "grab-now";
@@ -840,13 +843,13 @@ const choseki = {
     const t = ctx.now();
     if (t < state.startAt) {
       const n = Math.ceil((state.startAt - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.clock.textContent = n; sfx.beep(); }
+      if (n !== c.lastCount) { c.lastCount = n; c.clock.textContent = n; cdTick(); }
       return;
     }
     if (!c.started) {
       c.started = true;
       c.btn.disabled = c.pressed;
-      sfx.go();
+      gameStartFx();
     }
     const e = t - state.startAt;
     if (e < 1200) {
@@ -990,10 +993,10 @@ const whack = {
     const t = ctx.now();
     if (t < state.startAt) {
       const n = Math.ceil((state.startAt - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; sfx.beep(); }
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
       return;
     }
-    if (!c.started) { c.started = true; c.countEl.textContent = "잡아라!!"; sfx.go(); setTimeout(() => { if (c.countEl) c.countEl.textContent = ""; }, 900); }
+    if (!c.started) { c.started = true; c.countEl.textContent = "잡아라!!"; gameStartFx(); setTimeout(() => { if (c.countEl) c.countEl.textContent = ""; }, 900); }
     const e = t - state.startAt;
     const claims = (ctx.game().claims) || {};
     for (const ev of c.events) {
@@ -1150,10 +1153,10 @@ const typing = {
     const t = ctx.now();
     if (t < state.startAt) {
       const n = Math.ceil((state.startAt - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; sfx.beep(); }
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
       return;
     }
-    if (!c.started) { c.started = true; c.input.disabled = false; c.input.focus(); sfx.go(); c.countEl.textContent = ""; }
+    if (!c.started) { c.started = true; c.input.disabled = false; c.input.focus(); gameStartFx(); c.countEl.textContent = ""; }
     const e = t - state.startAt;
     const active = words.find(w => e >= w.at && e < w.at + w.ttl);
     const claims = (ctx.game().claims) || {};
@@ -1289,7 +1292,7 @@ const bomb = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { map: {}, lastBoomKey: "", lastHolder: null, passing: false };
+    const c = this._c = { map: {}, lastBoomKey: "", lastHolder: null, passBlockUntil: 0 };
     stage.innerHTML = `
       <div class="grab-field bomb-field" id="bombField">
         <div class="bomb-prob" id="bombProb">💥 1%</div>
@@ -1317,6 +1320,7 @@ const bomb = {
     }
     c.cleanupWin = circleLayout(c.field, c.map);
     c.stopLoop = gameLoop(() => this._render(ctx));
+    gameStartFx();
   },
 
   _alive(ctx, state) {
@@ -1350,18 +1354,20 @@ const bomb = {
     });
   },
 
-  async _tryPass(ctx, target) {
+  _tryPass(ctx, target) {
     const c = this._c;
     const state = ctx.state();
-    if (!c || !state || c.passing) return;
+    if (!c || !state) return;
+    // 시간 기반 연타 방지 — 프라미스가 안 끝나도 0.5초 뒤엔 다시 시도 가능 (영구 잠김 방지)
+    const nowMs = Date.now();
+    if (c.passBlockUntil && nowMs < c.passBlockUntil) return;
     const out = state.out || {};
     if (state.holder !== ctx.uid || out[target] || target === ctx.uid) return;
-    c.passing = true;
+    c.passBlockUntil = nowMs + 500;
     sfx.swoosh();
     // 예비 경로: 트랜잭션이 어떤 이유로든 실패하면 방장 릴레이(hostTick)가 처리
     ctx.writeInput({ pass: target, k: state.tAssign });
-    try { await this._applyPass(ctx, ctx.uid, target); } catch { /* noop */ }
-    c.passing = false;
+    this._applyPass(ctx, ctx.uid, target).catch(() => {});
   },
 
   _render(ctx) {
@@ -1551,7 +1557,7 @@ const mash = {
         c.numEl.classList.remove("fg-pop");
         void c.numEl.offsetWidth;
         c.numEl.classList.add("fg-pop");
-        sfx.count(n);
+        cdTick();
       }
       return;
     }
@@ -1564,7 +1570,7 @@ const mash = {
       c.myEl.style.display = "";
       c.btn.disabled = false;
       c.btn.textContent = "눌러!!!!!!";
-      sfx.go();
+      gameStartFx();
       setTimeout(() => { if (c.numEl) c.numEl.textContent = ""; }, 1100);
     }
     if (!c.ended && t > state.startAt + MASH_DUR) {
@@ -1654,6 +1660,7 @@ const block = {
       c.bench.appendChild(el);
     }
     c.stopLoop = gameLoop(() => this._tick(ctx));
+    gameStartFx();
   },
 
   _renderTiles(ctx, k) {
@@ -1936,14 +1943,14 @@ const tug = {
     const t = ctx.now();
     if (t < state.startAt) {
       const n = Math.ceil((state.startAt - t) / 1000);
-      if (n !== c.lastCount) { c.lastCount = n; c.statusEl.textContent = n; sfx.beep(); }
+      if (n !== c.lastCount) { c.lastCount = n; c.statusEl.textContent = n; cdTick(); }
       return;
     }
     if (!c.started) {
       c.started = true;
       c.statusEl.textContent = "당겨라!!";
       if (c.btn) c.btn.disabled = false;
-      sfx.go();
+      gameStartFx();
       setTimeout(() => { if (c.statusEl) c.statusEl.textContent = ""; }, 900);
     }
     const rope = state.rope || 0;
@@ -2130,9 +2137,11 @@ const wake = {
     const t = ctx.now();
     if (t < state.turnStartAt && c.lastTurn === -1) {
       const n = Math.ceil((state.turnStartAt - t) / 1000);
+      if (n !== c.cdLast) { c.cdLast = n; cdTick(); }
       this._setStatus(`잠시 후 시작… ${n}`);
       return;
     }
+    if (!c.started) { c.started = true; gameStartFx(); }
     if (state.awake || state.done) {
       c.needle.style.opacity = 0;
       this._setStatus(state.awake ? "들개가 깼다!! 😱" : "다들 무사히 살아남았다! 🎉");
@@ -2239,6 +2248,150 @@ const wake = {
     if (c.stopLoop) c.stopLoop();
     this._c = null;
   }
+};
+
+// ═════════════════════════════════════════════
+// 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
+// (게임 소개 오버레이에서 글 설명 대신 사용)
+// ═════════════════════════════════════════════
+const DM_COLORS = ["#e64a3c", "#45a3e5", "#f5a623", "#58b647"];
+
+function dmStage(cls) {
+  const d = document.createElement("div");
+  d.className = "demo " + cls;
+  return d;
+}
+function dmChar(i, cls, size = 44, opts = {}) {
+  const el = makeChar(Object.assign({ color: DM_COLORS[i % 4], nick: "", size, motion: "none" }, opts));
+  if (cls) el.classList.add(...cls.split(" "));
+  return el;
+}
+function dmProp(cls, text) {
+  const s = document.createElement("div");
+  s.className = "demo-prop " + cls;
+  if (text !== undefined) s.textContent = text;
+  return s;
+}
+function dmAt(el, left, top) {
+  el.style.left = left;
+  el.style.top = top;
+  return el;
+}
+
+nunchi.demo = () => {
+  const d = dmStage("dm-nunchi");
+  d.appendChild(dmAt(dmChar(1), "14%", "52%"));
+  d.appendChild(dmAt(dmChar(0, "dm-n-hero"), "42%", "52%"));
+  d.appendChild(dmAt(dmChar(2), "70%", "52%"));
+  d.appendChild(dmAt(dmProp("dm-n-bubble", "얍!!"), "50%", "18%"));
+  d.appendChild(dmAt(dmProp("dm-n-ok", "✓ 혼자 성공!"), "50%", "2%"));
+  return d;
+};
+
+mugunghwa.demo = () => {
+  const d = dmStage("dm-mg");
+  d.appendChild(dmAt(dmProp("dm-mg-line"), "78%", "10%"));
+  d.appendChild(dmAt(dmChar(0, "dm-mg-runner"), "6%", "48%"));
+  d.appendChild(dmAt(dmChar(3, "dm-mg-tagger", 50), "82%", "40%"));
+  d.appendChild(dmAt(dmProp("dm-mg-alert", "🚨 멈춰!"), "40%", "8%"));
+  return d;
+};
+
+grab.demo = () => {
+  const d = dmStage("dm-grab");
+  d.appendChild(dmAt(dmProp("dm-g-wait", "・・・"), "50%", "16%"));
+  d.appendChild(dmAt(dmProp("dm-g-now", "지금!!"), "50%", "10%"));
+  d.appendChild(dmAt(dmChar(1), "24%", "46%"));
+  d.appendChild(dmAt(dmProp("dm-g-btn demo-btn", "잡기!"), "62%", "58%"));
+  d.appendChild(dmAt(dmProp("dm-g-tap", "👆"), "64%", "74%"));
+  return d;
+};
+
+choseki.demo = () => {
+  const d = dmStage("dm-cs");
+  d.appendChild(dmAt(dmProp("dm-c-open", "⏱ 2.00…"), "50%", "12%"));
+  d.appendChild(dmAt(dmProp("dm-c-hidden", "?.?? 🙈"), "50%", "12%"));
+  d.appendChild(dmAt(dmChar(2), "24%", "46%"));
+  d.appendChild(dmAt(dmProp("dm-c-btn demo-btn", "멈춰!"), "62%", "58%"));
+  d.appendChild(dmAt(dmProp("dm-c-tap", "👆"), "64%", "74%"));
+  return d;
+};
+
+whack.demo = () => {
+  const d = dmStage("dm-whack");
+  for (const l of ["14%", "42%", "70%"]) d.appendChild(dmAt(dmProp("dm-w-hole"), l, "62%"));
+  const wrap = dmAt(dmProp("dm-w-molewrap"), "42%", "24%");
+  wrap.appendChild(dmChar(0, "dm-w-mole", 40, { color: "#a5713f" }));
+  d.appendChild(wrap);
+  d.appendChild(dmAt(dmProp("dm-w-tap", "👆"), "52%", "40%"));
+  d.appendChild(dmAt(dmProp("dm-w-pop", "제일 빨리! +1"), "50%", "4%"));
+  return d;
+};
+
+typing.demo = () => {
+  const d = dmStage("dm-type");
+  d.appendChild(dmAt(dmProp("dm-t-card", "떡볶이"), "50%", "10%"));
+  const line = dmAt(dmProp("dm-t-inputline"), "50%", "58%");
+  line.appendChild(dmProp("dm-t-typed", "떡볶이"));
+  d.appendChild(line);
+  d.appendChild(dmAt(dmProp("dm-t-ok", "빨리 치면 획득! ✓"), "50%", "82%"));
+  return d;
+};
+
+bomb.demo = () => {
+  const d = dmStage("dm-bomb");
+  d.appendChild(dmAt(dmChar(0), "12%", "46%"));
+  d.appendChild(dmAt(dmChar(1), "42%", "46%"));
+  d.appendChild(dmAt(dmChar(2), "72%", "46%"));
+  d.appendChild(dmAt(dmProp("dm-b-bomb", "💣"), "16%", "26%"));
+  d.appendChild(dmAt(dmProp("dm-b-boom", "💥"), "76%", "30%"));
+  return d;
+};
+
+mash.demo = () => {
+  const d = dmStage("dm-mash");
+  d.appendChild(dmAt(dmChar(3), "24%", "46%"));
+  d.appendChild(dmAt(dmProp("dm-m-btn demo-btn", "눌러!!"), "60%", "56%"));
+  d.appendChild(dmAt(dmProp("dm-m-tap", "👆"), "62%", "72%"));
+  d.appendChild(dmAt(dmProp("dm-m-p1", "+1"), "58%", "36%"));
+  d.appendChild(dmAt(dmProp("dm-m-p2", "+1"), "70%", "42%"));
+  return d;
+};
+
+block.demo = () => {
+  const d = dmStage("dm-block");
+  d.appendChild(dmAt(dmProp("dm-bk-tile dm-bk-left"), "30%", "56%"));
+  d.appendChild(dmAt(dmProp("dm-bk-tile dm-bk-right"), "76%", "56%"));
+  d.appendChild(dmAt(dmChar(0, "dm-bk-fall1", 36), "20%", "36%"));
+  d.appendChild(dmAt(dmChar(2, "dm-bk-fall2", 36), "32%", "36%"));
+  d.appendChild(dmAt(dmChar(1, "dm-bk-safe", 36), "70%", "36%"));
+  d.appendChild(dmAt(dmProp("dm-bk-boom", "💥 많은 쪽 탈락!"), "28%", "6%"));
+  return d;
+};
+
+tug.demo = () => {
+  const d = dmStage("dm-tug");
+  d.appendChild(dmAt(dmProp("dm-tg-rope"), "50%", "56%"));
+  d.appendChild(dmAt(dmProp("dm-tg-knot", "🔴"), "50%", "56%"));
+  d.appendChild(dmAt(dmChar(0, "dm-tg-l", 40, { color: "#e0472f" }), "8%", "40%"));
+  d.appendChild(dmAt(dmChar(0, "dm-tg-l", 40, { color: "#e0472f" }), "22%", "44%"));
+  d.appendChild(dmAt(dmChar(1, "dm-tg-r", 40, { color: "#3b6fd4" }), "76%", "40%"));
+  d.appendChild(dmAt(dmChar(1, "dm-tg-r", 40, { color: "#3b6fd4" }), "90%", "44%"));
+  d.appendChild(dmAt(dmProp("dm-tg-win", "🏆"), "14%", "8%"));
+  return d;
+};
+
+wake.demo = () => {
+  const d = dmStage("dm-wake");
+  d.appendChild(dmAt(dmProp("dm-wk-dog", "🐶"), "50%", "2%"));
+  d.appendChild(dmAt(dmProp("dm-wk-zzz", "💤"), "62%", "0%"));
+  const bar = dmAt(dmProp("dm-wk-bar"), "50%", "52%");
+  bar.appendChild(dmProp("dm-wk-green"));
+  bar.appendChild(dmProp("dm-wk-needle"));
+  d.appendChild(bar);
+  d.appendChild(dmAt(dmProp("dm-wk-tap", "👆"), "52%", "74%"));
+  d.appendChild(dmAt(dmProp("dm-wk-hint", "초록에서 멈춰!"), "50%", "88%"));
+  return d;
 };
 
 export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "tug", "wake"];

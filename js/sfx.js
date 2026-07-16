@@ -17,7 +17,7 @@ function ac() {
 // 첫 사용자 입력에서 오디오 잠금 해제 (모바일 필수)
 export function unlockAudio() {
   try { ac(); } catch { /* 오디오 미지원 환경 */ }
-  preloadFahh(); // FAHH 미리 디코딩 — 첫 사용 때도 즉시 재생되게
+  preloadSfx(); // 파일 효과음 미리 디코딩 — 첫 사용 때도 즉시 재생되게
   syncBgm(); // 제스처 이후 BGM 재생 재시도
 }
 
@@ -27,6 +27,9 @@ export function toggleMute() {
   localStorage.setItem("sm_muted", muted ? "1" : "0");
   if (master) master.gain.value = muted ? 0 : 0.5;
   syncBgm();
+  // 라운드 음악도 음소거 연동
+  if (muted) { for (const el of Object.values(musicEls)) el.pause(); }
+  else if (roundStarted && roundTrack) musicFor(roundTrack).play().catch(() => {});
   return muted;
 }
 
@@ -64,60 +67,107 @@ export function playDrumroll() {
   } catch { /* noop */ }
 }
 
-// ── FAHHHH (로비 감정표현 4번) ─────────────────
-// HTMLAudio는 로드/시동 지연 때문에 진동 연출과 싱크가 어긋난다.
-// Web Audio 버퍼로 미리 디코딩해 두고, 파일 앞의 무음 구간도 건너뛰어
+// ── 파일 기반 효과음 (Web Audio 버퍼) ──────────
+// HTMLAudio는 로드/시동 지연 때문에 연출과 싱크가 어긋난다.
+// 미리 디코딩해 두고 파일 앞의 무음 구간도 건너뛰어
 // start() 순간 = 실제 소리 시작이 되게 한다.
-let fahhBuf = null;
-let fahhOffset = 0;
-let fahhLoading = null;
+const BUF_SRC = {
+  fahh: "assets/fahh.mp3",
+  yay: "assets/yay.mp3",
+  gong: "assets/gong.mp3",
+  count: "assets/count.wav"
+};
+const bufs = {};
+const bufLoads = {};
 
-export function preloadFahh() {
-  if (fahhBuf || fahhLoading) return fahhLoading;
+function loadBuf(name) {
+  if (bufs[name]) return Promise.resolve(bufs[name]);
+  if (bufLoads[name]) return bufLoads[name];
   try {
     const c = ac();
-    fahhLoading = fetch("assets/fahh.mp3")
+    bufLoads[name] = fetch(BUF_SRC[name])
       .then(r => r.arrayBuffer())
       .then(ab => c.decodeAudioData(ab))
       .then(buf => {
-        // 앞부분 무음 스킵 지점 찾기
         const d = buf.getChannelData(0);
         let i = 0;
         while (i < d.length && Math.abs(d[i]) < 0.02) i++;
-        fahhOffset = Math.max(0, i / buf.sampleRate - 0.005);
-        fahhBuf = buf;
+        buf._skip = Math.max(0, i / buf.sampleRate - 0.005);
+        bufs[name] = buf;
         return buf;
       })
-      .catch(() => { fahhLoading = null; });
-    return fahhLoading;
-  } catch { return null; }
+      .catch(() => { bufLoads[name] = null; });
+    return bufLoads[name];
+  } catch { return Promise.resolve(null); }
 }
 
-/**
- * FAHHHH 재생. onStart는 소리가 "실제로 시작되는 순간" 호출된다
- * (진동 연출 싱크용 — 음소거 상태여도 호출됨)
- */
-export function playFahh(onStart) {
+export function preloadSfx() {
+  for (const name of Object.keys(BUF_SRC)) loadBuf(name);
+}
+
+/** onStart는 소리가 "실제로 시작되는 순간" 호출 (연출 싱크용, 음소거여도 호출) */
+function playBuf(name, vol, onStart) {
   const fire = () => { if (onStart) { onStart(); onStart = null; } };
   try {
     const c = ac();
     const go = () => {
-      if (!fahhBuf) { fire(); return; }
+      const buf = bufs[name];
+      if (!buf) { fire(); return; }
       const src = c.createBufferSource();
-      src.buffer = fahhBuf;
+      src.buffer = buf;
       const g = c.createGain();
-      g.gain.value = 0.9;
+      g.gain.value = vol;
       src.connect(g).connect(master); // master가 음소거 게인 처리
-      src.start(0, fahhOffset);
+      src.start(0, buf._skip || 0);
       fire();
     };
-    if (fahhBuf) go();
-    else {
-      const p = preloadFahh();
-      if (p) p.then(go, fire);
-      else fire();
-    }
+    if (bufs[name]) go();
+    else loadBuf(name).then(go, fire);
   } catch { fire(); }
+}
+
+export const playFahh = onStart => playBuf("fahh", 0.9, onStart);
+export const playYay = () => playBuf("yay", 0.85);
+export const playGong = () => playBuf("gong", 0.9);
+export const cdTick = () => playBuf("count", 0.65);
+
+// ── 라운드 음악 (게임 시작~결과 전까지) ─────────
+let musicEls = {};
+let roundTrack = null;
+let roundStarted = false;
+
+function musicFor(track) {
+  if (!musicEls[track]) {
+    const el = new Audio(track === "apex" ? "assets/bgm-apex.mp3" : "assets/bgm-sunny.mp3");
+    el.loop = true;
+    el.volume = 0.32;
+    musicEls[track] = el;
+  }
+  return musicEls[track];
+}
+
+/** 이번 라운드에 쓸 음악 예약 (play 페이즈 진입 시 호출) */
+export function setRoundMusic(track) {
+  roundTrack = track;
+  roundStarted = false;
+}
+
+/** 카운트다운이 끝나고 게임이 실제 시작되는 순간: 예이! + 라운드 음악 (라운드당 1회) */
+export function gameStartFx() {
+  if (roundStarted) return;
+  roundStarted = true;
+  playYay();
+  if (roundTrack && !muted) {
+    const el = musicFor(roundTrack);
+    el.currentTime = 0;
+    el.play().catch(() => {});
+  }
+}
+
+export function stopRoundMusic() {
+  roundTrack = null;
+  roundStarted = false;
+  for (const el of Object.values(musicEls)) el.pause();
 }
 
 function osc({ type = "sine", freq = 440, to = null, dur = 0.15, vol = 0.5, delay = 0, curve = "exp" }) {
