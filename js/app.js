@@ -662,7 +662,8 @@ async function runResult(token) {
 // 게임별 짧은 이름 (점수표 헤더용)
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
-  whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록"
+  whack: "두더지", typing: "타이핑", bomb: "폭탄", mash: "연타", block: "블록",
+  simon: "가라사대"
 };
 
 // 최종 리더보드

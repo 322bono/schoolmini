@@ -1757,5 +1757,191 @@ const block = {
   }
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block };
+// ═════════════════════════════════════════════
+// 10. 가라사대!
+// ═════════════════════════════════════════════
+const SIMON_START = 3000;
+const SIMON_ROUND_MS = 2000;
+const SIMON_DECIDE_MS = 1500;
+const SIMON_ROUNDS = 9;
+const SIMON_CMDS = [
+  "박수 쳐!", "만세!", "점프해!", "손 들어!", "발 굴러!",
+  "뒤로 돌아!", "눈 감아!", "브이!", "하이파이브!", "고개 끄덕!",
+  "허리 숙여!", "제자리 뛰기!"
+];
+
+function genCommands(seed) {
+  const rng = mulberry32(seed);
+  const pool = SIMON_CMDS.slice();
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const rounds = [];
+  let t = 1000;
+  for (let i = 0; i < SIMON_ROUNDS; i++) {
+    rounds.push({ i, cmd: pool[i], prefixed: rng() < 0.58, at: t, ttl: SIMON_DECIDE_MS });
+    t += SIMON_ROUND_MS;
+  }
+  return { rounds, total: t };
+}
+
+const simon = {
+  id: "simon",
+  name: "가라사대!",
+  tag: "선생님이 말씀하시면만 따라해!",
+  desc: "명령 앞에 <b>'선생님이 말씀하시길'</b>이 붙으면 [따라하기!]를 눌러!<br>안 붙었는데 누르거나, 붙었는데 안 누르면 그 순간 탈락!<br>제일 오래 살아남은 사람이 승리!",
+
+  duration: () => SIMON_START + SIMON_ROUNDS * SIMON_ROUND_MS + 2500,
+  hostSetup(ctx) {
+    return { seed: Math.floor(Math.random() * 1e9), startAt: ctx.playStart + SIMON_START };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, roundIdx: -1, answered: {}, resolved: {}, out: {}, map: {} };
+    stage.innerHTML = `
+      <div class="wa-top">
+        <span class="sketch hud-chip">라운드 <b id="smRound">-</b>/${SIMON_ROUNDS}</span>
+        <span class="wa-count" id="smCount"></span>
+      </div>
+      <div class="sm-card sketch" id="smCard">
+        <div class="sm-prefix" id="smPrefix">선생님이 말씀하시길</div>
+        <div class="sm-cmd" id="smCmd">준비…</div>
+      </div>
+      <div class="char-field" id="smField"></div>`;
+    c.roundEl = stage.querySelector("#smRound");
+    c.countEl = stage.querySelector("#smCount");
+    c.card = stage.querySelector("#smCard");
+    c.prefixEl = stage.querySelector("#smPrefix");
+    c.cmdEl = stage.querySelector("#smCmd");
+    const field = stage.querySelector("#smField");
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 50 });
+      if (pid === ctx.uid) el.classList.add("me");
+      c.map[pid] = el;
+      field.appendChild(el);
+    }
+
+    const btn = actionBtn(dock, "따라하기!");
+    btn.disabled = true;
+    c.btn = btn;
+    btn.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      const state = ctx.state();
+      const sched = this._schedule(ctx);
+      if (!state || !sched || c.out[ctx.uid]) return;
+      const t = ctx.now() - state.startAt;
+      const r = sched.rounds.find(x => t >= x.at && t < x.at + x.ttl);
+      if (!r || c.answered[r.i]) return;
+      c.answered[r.i] = true;
+      ctx.writeInput({ ["r" + r.i]: 1 });
+      this._localFeedback(r.prefixed);
+    });
+
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _schedule(ctx) {
+    const c = this._c;
+    const state = ctx.state();
+    if (!c.sched && state && state.seed !== undefined) c.sched = genCommands(state.seed);
+    return c.sched;
+  },
+
+  _localFeedback(ok) {
+    const c = this._c;
+    c.card.classList.remove("sm-ok", "sm-bad");
+    void c.card.offsetWidth;
+    c.card.classList.add(ok ? "sm-ok" : "sm-bad");
+    (ok ? sfx.correct : sfx.wrong)();
+    if (!ok) vibrate(200);
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || !state.startAt) return;
+    const sched = this._schedule(ctx);
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; sfx.beep(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.btn.disabled = false; c.countEl.textContent = ""; sfx.go(); }
+    if (!sched) return;
+    const e = t - state.startAt;
+    const r = sched.rounds.find(x => e >= x.at && e < x.at + x.ttl);
+    if (r) {
+      if (c.roundIdx !== r.i) {
+        c.roundIdx = r.i;
+        c.roundEl.textContent = r.i + 1;
+        c.cmdEl.textContent = r.cmd;
+        c.prefixEl.classList.toggle("show", r.prefixed);
+        c.card.className = "sm-card sketch" + (r.prefixed ? " sm-armed" : "");
+      }
+    } else {
+      const prev = c.roundIdx >= 0 ? sched.rounds[c.roundIdx] : null;
+      if (prev && !c.resolved[prev.i] && e >= prev.at + prev.ttl) this._resolveRound(ctx, prev);
+      if (c.cmdEl.textContent !== "…") {
+        c.cmdEl.textContent = "…";
+        c.prefixEl.classList.remove("show");
+        c.card.className = "sm-card sketch";
+      }
+    }
+  },
+
+  _resolveRound(ctx, r) {
+    const c = this._c;
+    if (c.resolved[r.i]) return;
+    c.resolved[r.i] = true;
+    const inputs = ctx.inputs() || {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (c.out[pid]) continue;
+      const tapped = !!(inputs[pid] && inputs[pid]["r" + r.i]);
+      if (tapped !== r.prefixed) {
+        c.out[pid] = true;
+        const el = c.map[pid];
+        if (el) { setFace(el, "dead"); setM(el, "caught"); el.style.opacity = 0.4; }
+      }
+    }
+  },
+
+  onState() {},
+  onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || !state.startAt) return false;
+    const sched = this._c && this._c.sched;
+    if (!sched) return false;
+    const last = sched.rounds[sched.rounds.length - 1];
+    if (ctx.now() - state.startAt > last.at + last.ttl + 900) return 1400;
+    return false;
+  },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const sched = genCommands(state && state.seed !== undefined ? state.seed : 0);
+    const players = Object.keys(ctx.players());
+    const survived = {};
+    for (const pid of players) {
+      let s = 0;
+      for (const r of sched.rounds) {
+        const tapped = !!(inputs[pid] && inputs[pid]["r" + r.i]);
+        if (tapped !== r.prefixed) break;
+        s++;
+      }
+      survived[pid] = s;
+    }
+    const ranked = players.slice().sort((a, b) => survived[b] - survived[a]);
+    return tierOutcome(ctx, ranked,
+      pid => survived[pid] >= SIMON_ROUNDS ? "완벽 클리어! 🎉" : `${survived[pid]}/${SIMON_ROUNDS}에서 실수`,
+      "안 움직였다… 💤");
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "bomb", "mash", "block", "simon"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, bomb, mash, block, simon };
