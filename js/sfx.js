@@ -158,6 +158,47 @@ export function stopSfxTails() {
   liveSrcs.clear();
 }
 
+// ── 임의 오디오 버퍼 재생 (성대모사 클립/녹음 등) ──
+// HTMLAudio와 달리 잠금 해제된 컨텍스트를 쓰므로 iOS에서 제스처 없이도 재생된다.
+const urlBufs = {};
+
+/** URL을 디코딩된 버퍼로 (캐시됨) */
+export function loadUrlBuffer(url) {
+  if (urlBufs[url]) return Promise.resolve(urlBufs[url]);
+  try {
+    const c = ac();
+    return fetch(url)
+      .then(r => r.arrayBuffer())
+      .then(ab => c.decodeAudioData(ab))
+      .then(buf => { urlBufs[url] = buf; return buf; });
+  } catch { return Promise.reject(new Error("audio unsupported")); }
+}
+
+/** base64 오디오(WAV 등) → 버퍼 */
+export function decodeB64Audio(b64) {
+  try {
+    const c = ac();
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return c.decodeAudioData(bytes.buffer);
+  } catch { return Promise.reject(new Error("decode fail")); }
+}
+
+/** 버퍼 재생 — 반환된 소스의 stop()으로 중단 가능 */
+export function playBuffer(buf, vol = 1, offsetSec = 0) {
+  const c = ac();
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const g = c.createGain();
+  g.gain.value = vol;
+  src.connect(g).connect(master);
+  liveSrcs.add(src);
+  src.onended = () => liveSrcs.delete(src);
+  src.start(0, Math.max(0, Math.min(offsetSec, Math.max(0, buf.duration - 0.01))));
+  return src;
+}
+
 export const playFahh = onStart => playBuf("fahh", 0.9, onStart);
 export const playYay = () => playBuf("yay", 0.85);
 export const playGong = () => playBuf("gong", 0.9);

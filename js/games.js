@@ -9,7 +9,7 @@
 //   hostEarlyEnd(ctx, i, s)    : 조기 종료 조건 → false | 지연ms
 //   evaluate(ctx, i, s)        : {outcome:{uid:'win'|'lose'}, detail:{uid:문구}}
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { sfx, playDrumroll, cdTick, gameStartFx } from "./sfx.js";
+import { sfx, playDrumroll, cdTick, gameStartFx, loadUrlBuffer, decodeB64Audio, playBuffer } from "./sfx.js";
 
 // ── 공통 헬퍼 ────────────────────────────────
 function shuffle(arr) {
@@ -2596,7 +2596,8 @@ const voice = {
   _c: null,
   mount(stage, dock, ctx) {
     const c = this._c = {
-      lastSub: "", cdLast: -1, audios: [], timers: [],
+      lastSub: "", cdLast: -1, srcs: [], timers: [],
+      clipBufP: null, recBufP: null,
       stream: null, recorder: null, chunks: [], micFail: false, processed: false
     };
     stage.innerHTML = `
@@ -2618,38 +2619,36 @@ const voice = {
     if (c && c.statusEl && c.statusEl.textContent !== text) c.statusEl.textContent = text;
   },
 
+  // 재생은 전부 Web Audio 버퍼 경로 — iOS에서도 제스처 없이 확실히 들린다
   _playClip(ctx, seekMs = 0) {
     const c = this._c;
     const state = ctx.state();
-    if (!c || !state) return;
-    try {
-      const a = new Audio(VOICE_CLIPS[state.clip].file);
-      a.volume = 1;
-      if (seekMs > 300) a.currentTime = seekMs / 1000;
-      a.play().catch(() => {});
-      c.audios.push(a);
-    } catch { /* noop */ }
+    if (!c || !state || !c.clipBufP) return;
+    const sub = c.lastSub;
+    c.clipBufP.then(buf => {
+      if (!buf || this._c !== c || c.lastSub !== sub) return; // 이미 다음 단계로 넘어감
+      c.srcs.push(playBuffer(buf, 1, seekMs / 1000));
+    });
   },
 
   _playRec(ctx) {
     const c = this._c;
     const state = ctx.state();
     const inp = state && ctx.inputs() && ctx.inputs()[state.perf];
-    if (!c || !inp || !inp.rec) return null;
-    try {
-      const a = new Audio("data:audio/wav;base64," + inp.rec);
-      a.volume = 1;
-      a.play().catch(() => {});
-      c.audios.push(a);
-      return a;
-    } catch { return null; }
+    if (!c || !inp || !inp.rec) return;
+    if (!c.recBufP) c.recBufP = decodeB64Audio(inp.rec).catch(() => null);
+    const sub = c.lastSub;
+    c.recBufP.then(buf => {
+      if (!buf || this._c !== c || c.lastSub !== sub) return;
+      c.srcs.push(playBuffer(buf, 1));
+    });
   },
 
   _stopAudios() {
     const c = this._c;
     if (!c) return;
-    for (const a of c.audios) { try { a.pause(); } catch { /* noop */ } }
-    c.audios = [];
+    for (const s of c.srcs) { try { s.stop(); } catch { /* noop */ } }
+    c.srcs = [];
   },
 
   // ── 주인공 전용: 마이크 준비/녹음/분석 ──
@@ -2694,7 +2693,9 @@ const voice = {
     const ac = new AC();
     try {
       const recBuf = await ac.decodeAudioData(await blob.arrayBuffer());
-      const refBuf = await ac.decodeAudioData(await (await fetch(VOICE_CLIPS[state.clip].file)).arrayBuffer());
+      // 원본은 듣기 단계에서 이미 디코딩해 둔 버퍼 재사용
+      const refBuf = await (c.clipBufP || loadUrlBuffer(VOICE_CLIPS[state.clip].file));
+      if (!refBuf) throw new Error("ref decode fail");
       // 녹음은 게임 시간 한도까지만 사용
       const rec16 = (await voiceTo16k(recBuf)).slice(0, Math.ceil(voiceRecDur(state.clip) / 1000 * 16000));
       const ref16 = await voiceTo16k(refBuf);
@@ -2711,6 +2712,10 @@ const voice = {
     if (!c) return;
     const state = ctx.state();
     if (!state || !state.sub) return;
+    // 원본 클립을 미리 디코딩해 둠 — 듣기 단계 진입 즉시 소리가 나게
+    if (!c.clipBufP && typeof state.clip === "number") {
+      c.clipBufP = loadUrlBuffer(VOICE_CLIPS[state.clip].file).catch(() => null);
+    }
     const t = ctx.now();
     const iAmPerf = state.perf === ctx.uid;
     const perfNick = (ctx.players()[state.perf] || {}).nick || "?";
