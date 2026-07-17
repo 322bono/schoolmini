@@ -724,7 +724,6 @@ async function runResult(token) {
   $("resultTitle").textContent = `${(GAMES[meta.curGame] || {}).name || "게임"} — 결과!`;
   ovl.classList.add("show");
   playGong(); // 결과 발표 공소리 (스파이시 포함 항상)
-  setTimeout(() => { if (resultToken === token) playCheer(); }, 900); // 텀 두고 환호+박수
 
   // 결과 데이터 대기 (호스트 쓰기 반영 레이스 대비)
   let waited = 0;
@@ -786,6 +785,7 @@ async function runResult(token) {
   if (winners.length) {
     sfx.win();
     sfx.coin();
+    playCheer(); // 환호+박수는 승자들이 점프하는 이 순간에
     for (const pid of winners) {
       const el = charMap[pid];
       setFace(el, "happy");
