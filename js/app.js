@@ -1,7 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
 import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
-import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playPodiumMusic, setRoundMusic, stopRoundMusic } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -660,8 +660,10 @@ function runSlot() {
   const H = 108;
   const total = items.length - 1;
   const dur = 6300;
+  const DRUM_MS = 3080; // drumroll.mp3 길이 — 멈추는 순간에 딱 끝나게 시작
   const t0 = performance.now();
   let lastIdx = -1;
+  let drumStarted = false;
   const loop = t => {
     const p = Math.min(1, (t - t0) / dur);
     const ease = 1 - Math.pow(1 - p, 3);
@@ -669,11 +671,15 @@ function runSlot() {
     reel.style.transform = `translateY(${-pos * H}px)`;
     const idx = Math.round(pos);
     if (idx !== lastIdx) { lastIdx = idx; sfx.tick(); }
+    if (!drumStarted && t - t0 >= dur - DRUM_MS) {
+      drumStarted = true;
+      playDrumroll(); // 두구두구… 결정 순간까지 고조
+    }
     if (p < 1) {
       slotRaf = requestAnimationFrame(loop);
     } else {
       win.classList.add("hit");
-      sfx.tada();
+      playHit(); // 딱! 결정 임팩트
     }
   };
   slotRaf = requestAnimationFrame(loop);

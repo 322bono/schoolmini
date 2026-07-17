@@ -77,6 +77,7 @@ const BUF_SRC = {
   yay: "assets/yay.mp3",
   gong: "assets/gong.mp3",
   cheer: "assets/cheer.mp3",
+  hit: "assets/hit.mp3",
   count: "assets/count.wav"
 };
 const bufs = {};
@@ -132,6 +133,7 @@ export const playFahh = onStart => playBuf("fahh", 0.9, onStart);
 export const playYay = () => playBuf("yay", 0.85);
 export const playGong = () => playBuf("gong", 0.9);
 export const playCheer = () => playBuf("cheer", 0.8);
+export const playHit = () => playBuf("hit", 0.95);
 export const cdTick = () => playBuf("count", 0.65);
 
 // ── 라운드 음악 (게임 시작~결과 전까지) ─────────
