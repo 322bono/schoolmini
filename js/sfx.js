@@ -18,7 +18,27 @@ function ac() {
 export function unlockAudio() {
   try { ac(); } catch { /* 오디오 미지원 환경 */ }
   preloadSfx(); // 파일 효과음 미리 디코딩 — 첫 사용 때도 즉시 재생되게
+  primeMusic(); // iOS: 음악 요소들을 제스처 안에서 미리 활성화
   syncBgm(); // 제스처 이후 BGM 재생 재시도
+}
+
+// iOS는 제스처 없이 만들어진 오디오 요소의 재생을 막을 수 있다.
+// 첫 터치(제스처) 안에서 모든 음악 요소를 무음으로 잠깐 재생해 미리 허가를 받아둠.
+let musicPrimed = false;
+function primeMusic() {
+  if (musicPrimed) return;
+  musicPrimed = true;
+  for (const track of Object.keys(MUSIC_SRC)) {
+    try {
+      const el = musicFor(track);
+      el.muted = true;
+      const p = el.play();
+      if (p && p.then) {
+        p.then(() => { el.pause(); el.currentTime = 0; el.muted = false; })
+          .catch(() => { el.muted = false; });
+      } else { el.pause(); el.muted = false; }
+    } catch { /* noop */ }
+  }
 }
 
 export function isMuted() { return muted; }
@@ -58,14 +78,9 @@ export function setBgm(on) {
   syncBgm();
 }
 
-/** 두구두구 드럼롤 (눈치블록 결과 연출) */
+/** 두구두구 드럼롤 — 버퍼 재생이라 iOS에서도 제스처 없이 확실히 재생됨 */
 export function playDrumroll() {
-  if (muted) return;
-  try {
-    const a = new Audio("assets/drumroll.mp3");
-    a.volume = 0.65;
-    a.play().catch(() => {});
-  } catch { /* noop */ }
+  playBuf("drum", 0.65);
 }
 
 // ── 파일 기반 효과음 (Web Audio 버퍼) ──────────
@@ -78,6 +93,7 @@ const BUF_SRC = {
   gong: "assets/gong.mp3",
   cheer: "assets/cheer.mp3",
   hit: "assets/hit.mp3",
+  drum: "assets/drumroll.mp3",
   count: "assets/count.wav"
 };
 const bufs = {};
@@ -108,6 +124,9 @@ export function preloadSfx() {
   for (const name of Object.keys(BUF_SRC)) loadBuf(name);
 }
 
+// 재생 중인 버퍼 소스 추적 — 긴 효과음(박수 등)이 다음 연출을 덮지 않게 끊을 수 있도록
+const liveSrcs = new Set();
+
 /** onStart는 소리가 "실제로 시작되는 순간" 호출 (연출 싱크용, 음소거여도 호출) */
 function playBuf(name, vol, onStart) {
   const fire = () => { if (onStart) { onStart(); onStart = null; } };
@@ -121,12 +140,20 @@ function playBuf(name, vol, onStart) {
       const g = c.createGain();
       g.gain.value = vol;
       src.connect(g).connect(master); // master가 음소거 게인 처리
+      liveSrcs.add(src);
+      src.onended = () => liveSrcs.delete(src);
       src.start(0, buf._skip || 0);
       fire();
     };
     if (bufs[name]) go();
     else loadBuf(name).then(go, fire);
   } catch { fire(); }
+}
+
+/** 아직 울리고 있는 효과음 꼬리를 전부 끊기 (연출 전환 시) */
+export function stopSfxTails() {
+  for (const src of liveSrcs) { try { src.stop(); } catch { /* noop */ } }
+  liveSrcs.clear();
 }
 
 export const playFahh = onStart => playBuf("fahh", 0.9, onStart);

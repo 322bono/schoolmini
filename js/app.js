@@ -1,7 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
 import { COLORS, MAX_PLAYERS } from "./config.js";
 import * as net from "./net.js";
-import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -174,6 +174,7 @@ function cleanupRoom(keepSaved = false) {
   if (!keepSaved) localStorage.removeItem("sm_room");
   stopMelody();
   stopRoundMusic();
+  stopSfxTails();
   room = null; meta = null; playersCache = {}; colorsCache = {}; gameCache = {}; historyCache = {};
   isHost = false; lastPhaseKey = ""; lastStatus = "";
   emoteSeen = {}; saySeen = {};
@@ -224,7 +225,7 @@ function onMeta() {
     if (lastStatus !== "playing") showScreen("scr-game");
     handlePhase();
   } else if (meta.status === "final") {
-    if (lastStatus !== "final") { stopRoundMusic(); showScreen("scr-final"); }
+    if (lastStatus !== "final") { stopRoundMusic(); stopSfxTails(); showScreen("scr-final"); }
     renderFinal();
   }
   lastStatus = meta.status;
@@ -582,12 +583,14 @@ function handlePhase() {
     case "spicy":
       unmountGame();
       stopRoundMusic();
+      stopSfxTails(); // 지난 라운드 박수 등 긴 꼬리 끊기
       hideOverlays();
       runSpicy();
       break;
     case "slot":
       unmountGame();
       stopRoundMusic();
+      stopSfxTails(); // 두구두구 전에 남은 박수 끊기
       hideOverlays();
       runSlot();
       break;
