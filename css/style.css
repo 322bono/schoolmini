@@ -119,6 +119,27 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   85% { transform: translate(2px, -2px) rotate(0.1deg); }
 }
 
+/* ── QR 초대 모달 ─────────────────────────── */
+.qr-modal {
+  position: fixed; inset: 0; z-index: 80;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(51, 49, 46, 0.45);
+  padding: 1rem;
+}
+.qr-modal[hidden] { display: none; }
+.qr-card {
+  display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
+  padding: 1.2rem 1.4rem;
+  max-width: min(360px, 92vw);
+  text-align: center;
+  animation: cardPop 0.35s cubic-bezier(0.2, 1.6, 0.4, 1);
+}
+.qr-title { font-size: 1.35rem; font-weight: 700; }
+.qr-box { width: min(240px, 64vw); }
+.qr-box svg { width: 100%; display: block; border: 3px solid var(--ink); border-radius: 8px; }
+.qr-code-lbl { font-size: 1.6rem; font-weight: 700; letter-spacing: 0.3em; }
+.qr-hint { font-size: 0.98rem; color: var(--ink-soft); line-height: 1.4; }
+
 /* ── 로비 채팅 ────────────────────────────── */
 .lobby-chat { width: 100%; max-width: 1060px; display: flex; gap: 0.4rem; }
 .lobby-chat .chat-input { flex: 1; font-size: 1.05rem; text-align: left; padding: 0.3em 0.7em; }

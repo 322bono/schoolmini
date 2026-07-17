@@ -37,6 +37,15 @@
     <button class="emote-opt" data-k="3" title="뒤집기">🙃</button>
     <button class="emote-opt" data-k="4" title="FAHHHH">📢</button>
   </div>
+  <div id="qrModal" class="qr-modal" hidden>
+    <div class="qr-card sketch">
+      <div class="qr-title">📱 QR로 바로 입장!</div>
+      <div class="qr-box" id="qrBox"></div>
+      <div class="qr-code-lbl" id="qrCodeLbl">----</div>
+      <div class="qr-hint">카메라로 찍으면 코드가 자동 입력돼!<br />닉네임만 쓰면 바로 시작!</div>
+      <button id="btnQrClose" class="btn">닫기</button>
+    </div>
+  </div>
   <div id="toast-wrap"></div>
 
   <div id="app">
@@ -80,6 +89,7 @@
       <div class="lobby-head">
         <span class="lbl">방 코드</span>
         <button id="roomCodeChip" class="room-code-chip sketch alt" title="눌러서 복사">----</button>
+        <button id="btnQr" class="btn btn-sm" title="QR로 초대">📱 QR</button>
         <span class="lbl">친구들에게 알려줘!</span>
         <span class="lobby-count sketch hud-chip" id="lobbyCount">1/20</span>
       </div>
@@ -106,6 +116,12 @@
               <button id="btnRoundMinus" class="btn btn-sm">−</button>
               <span class="val" id="roundsVal">4</span>
               <button id="btnRoundPlus" class="btn btn-sm">＋</button>
+            </div>
+            <div class="stepper-lbl">최대 인원</div>
+            <div class="stepper sketch alt2" style="padding:.25rem .4rem">
+              <button id="btnMaxMinus" class="btn btn-sm">−</button>
+              <span class="val" id="maxVal">20</span>
+              <button id="btnMaxPlus" class="btn btn-sm">＋</button>
             </div>
             <button id="btnStart" class="btn btn-lg btn-red boil">START!</button>
           </div>

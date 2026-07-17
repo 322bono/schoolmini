@@ -7,7 +7,7 @@ import {
   getDatabase, ref, get, set, update, remove, onValue, onDisconnect,
   runTransaction, serverTimestamp, query, orderByChild, endAt, limitToFirst
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
-import { firebaseConfig, MAX_PLAYERS, ROOM_TTL_MS } from "./config.js";
+import { firebaseConfig, MAX_PLAYERS, ROOM_TTL_MS, COLORS } from "./config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -91,6 +91,7 @@ export async function createRoom(nick) {
       hostUid: _uid,
       status: "lobby",
       rounds: 4,
+      maxPlayers: MAX_PLAYERS,
       curRound: 0,
       phase: null
     },
@@ -126,13 +127,14 @@ export async function joinRoom(code, nick) {
 
   if (meta.status !== "lobby") throw new Error("이미 게임이 시작된 방이야! 끝날 때까지 기다려줘");
 
+  const cap = meta.maxPlayers || MAX_PLAYERS;
   const res = await dbTxn(`rooms/${code}/players`, players => {
-    if (players && Object.keys(players).length >= MAX_PLAYERS) return; // abort
+    if (players && Object.keys(players).length >= cap) return; // abort
     players = players || {};
     players[_uid] = { nick, color: -1, score: 0, online: true, joined: Date.now(), tab: TAB_ID };
     return players;
   });
-  if (!res.committed) throw new Error(`방이 꽉 찼어! (최대 ${MAX_PLAYERS}명)`);
+  if (!res.committed) throw new Error(`방이 꽉 찼어! (최대 ${cap}명)`);
 
   presence(`rooms/${code}/players/${_uid}`);
   await claimFirstFreeColor(code);
@@ -140,7 +142,7 @@ export async function joinRoom(code, nick) {
 }
 
 export async function claimFirstFreeColor(code) {
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < COLORS.length; i++) {
     if (await claimColor(code, i)) return i;
   }
   return -1;

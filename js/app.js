@@ -1,6 +1,7 @@
 // 스쿨 미니 — 메인 앱 (화면 전환 / 로비 / 호스트 게임 루프 / 연출)
-import { COLORS, MAX_PLAYERS } from "./config.js";
+import { COLORS, MAX_PLAYERS, MAX_PLAYERS_MIN, MAX_PLAYERS_MAX } from "./config.js";
 import * as net from "./net.js";
+import { qrSvg } from "./qr.js";
 import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
@@ -265,10 +266,11 @@ function renderLobbyMeta() {
   if (!meta || meta.status !== "lobby") return;
   $("roomCodeChip").textContent = room || "----";
   const n = Object.keys(playersCache).length;
-  $("lobbyCount").textContent = `${n}/${MAX_PLAYERS}`;
+  $("lobbyCount").textContent = `${n}/${meta.maxPlayers || MAX_PLAYERS}`;
   $("hostControls").style.display = isHost ? "flex" : "none";
   $("guestNotice").style.display = isHost ? "none" : "";
   $("roundsVal").textContent = meta.rounds || 4;
+  $("maxVal").textContent = meta.maxPlayers || MAX_PLAYERS;
   const start = $("btnStart");
   start.disabled = n < 2;
   start.title = n < 2 ? "2명부터 시작할 수 있어!" : "";
@@ -1309,6 +1311,31 @@ $("btnRoundPlus").addEventListener("click", () => {
   sfx.click();
   net.dbUpdate(`rooms/${room}/meta`, { rounds: Math.min(10, (meta.rounds || 4) + 1) });
 });
+$("btnMaxMinus").addEventListener("click", () => {
+  if (!isHost || !meta) return;
+  sfx.click();
+  // 현재 인원보다 낮게는 못 줄임
+  const floor = Math.max(MAX_PLAYERS_MIN, Object.keys(playersCache).length);
+  net.dbUpdate(`rooms/${room}/meta`, { maxPlayers: Math.max(floor, (meta.maxPlayers || MAX_PLAYERS) - 1) });
+});
+$("btnMaxPlus").addEventListener("click", () => {
+  if (!isHost || !meta) return;
+  sfx.click();
+  net.dbUpdate(`rooms/${room}/meta`, { maxPlayers: Math.min(MAX_PLAYERS_MAX, (meta.maxPlayers || MAX_PLAYERS) + 1) });
+});
+
+// ── QR 초대 ──────────────────────────────────
+$("btnQr").addEventListener("click", () => {
+  if (!room) return;
+  sfx.click();
+  $("qrBox").innerHTML = qrSvg(`${location.origin}${location.pathname}?join=${room}`);
+  $("qrCodeLbl").textContent = room;
+  $("qrModal").hidden = false;
+});
+$("btnQrClose").addEventListener("click", () => { $("qrModal").hidden = true; });
+$("qrModal").addEventListener("pointerdown", e => {
+  if (e.target === $("qrModal")) $("qrModal").hidden = true;
+});
 // 감정표현 버튼 + 피커
 $("btnEmote").addEventListener("click", () => {
   if (Date.now() < emoteCdUntil) return;
@@ -1343,8 +1370,12 @@ $("btnAgain").addEventListener("click", async () => {
 setupMascot();
 setBgm(true); // 첫 화면(홈)부터 BGM — 실제 재생은 첫 터치 후 시작됨
 
-// 부팅: 익명 로그인 → (있으면) 이전 방 자동 복귀
+// 부팅: 익명 로그인 → QR 링크(?join=코드)면 코드 채워진 참가 화면 → 아니면 이전 방 자동 복귀
 (async () => {
+  // QR로 들어온 경우: 주소에서 코드를 꺼내고 URL은 깨끗하게 (새로고침 시 재발동 방지)
+  const qrCode = net.normalizeCode(new URLSearchParams(location.search).get("join") || "");
+  if (qrCode) history.replaceState(null, "", location.pathname);
+
   try {
     UID = await net.ready();
   } catch (e) {
@@ -1352,6 +1383,14 @@ setBgm(true); // 첫 화면(홈)부터 BGM — 실제 재생은 첫 터치 후 �
     console.error(e);
     return;
   }
+
+  if (qrCode.length === 4) {
+    openEntry("join");
+    $("inpCode").value = qrCode;
+    toast("방 코드가 자동으로 입력됐어! 닉네임만 쓰면 끝 ✏️");
+    return;
+  }
+
   const savedRoom = localStorage.getItem("sm_room");
   const savedNick = localStorage.getItem("sm_nick");
   if (savedRoom && savedNick) {
