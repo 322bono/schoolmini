@@ -2444,16 +2444,17 @@ const VOICE_PASS = 70;
 // 채점 요소: [키, 라벨, 만점]
 const VOICE_ELEMS = [["p", "음높이", 30], ["i", "억양", 30], ["r", "리듬", 25], ["l", "길이", 15]];
 
-function voiceRecDur(clip) { return Math.max(4000, VOICE_CLIPS[clip].dur + 2000); }
+function voiceRecDur(clip) { return Math.max(6000, VOICE_CLIPS[clip].dur + 3000); }
 function voiceSubLens(clip) {
   const dur = VOICE_CLIPS[clip].dur;
   const rec = voiceRecDur(clip);
   return {
-    roulette: 4200, listen1: dur + 1200, listen2: dur + 1200, count: 3200,
+    // prep: 주인공의 마이크 권한 팝업이 끝날 때까지 대기 (micready 입력으로 조기 진행)
+    roulette: 4200, prep: 20000, listen1: dur + 2000, listen2: dur + 2000, count: 3200,
     record: rec + 400, waitrec: 8000, playback: rec + 800, overlay: rec + 800, score: 11500
   };
 }
-const VOICE_SUB_ORDER = ["roulette", "listen1", "listen2", "count", "record", "waitrec", "playback", "overlay", "score"];
+const VOICE_SUB_ORDER = ["roulette", "prep", "listen1", "listen2", "count", "record", "waitrec", "playback", "overlay", "score"];
 
 /** AudioBuffer → 16kHz 모노 Float32 (분석·전송 공용 포맷) */
 async function voiceTo16k(buf) {
@@ -2580,7 +2581,7 @@ const voice = {
 
   stampOnTimeout: false,
   noStartFx: true, // 이 게임은 라운드 음악/예이 없음 (신호음만)
-  duration: () => 72500,
+  duration: () => 98000,
   hostSetup(ctx) {
     const players = ctx.players();
     const humans = Object.keys(players).filter(id => !players[id].bot);
@@ -2759,7 +2760,6 @@ const voice = {
         c.main.appendChild(el);
         this._setStatus(`🎤 ${iAmPerf ? "내가 주인공!!" : perfNick + " 당첨!!"}`);
         sfx.bbam();
-        if (iAmPerf) this._prepMic(); // 마이크 권한 미리 요청
       }
     } else if (state.sub === "count") {
       const n = Math.ceil((state.subAt + 3200 - t) / 1000);
@@ -2791,13 +2791,29 @@ const voice = {
         c.timers.push(c.roulInt);
         break;
       }
+      case "prep": {
+        // 마이크 권한 팝업이 듣기 단계를 덮치지 않게 — 준비가 끝나야 다음으로
+        this._setStatus(iAmPerf ? "🎙 마이크 허용을 눌러줘!" : `🎙 ${perfNick}이(가) 마이크 준비 중…`);
+        c.note.textContent = iAmPerf ? "팝업에서 [허용]을 누르면 시작!" : "잠깐만 기다려줘!";
+        c.main.innerHTML = `<div class="vc-speaker">🎙</div>`;
+        if (iAmPerf && !c.prepStarted) {
+          c.prepStarted = true;
+          this._prepMic().then(() => ctx.writeInput({ micready: 1 }));
+        }
+        break;
+      }
       case "listen1":
       case "listen2": {
         const nth = state.sub === "listen1" ? 1 : 2;
         this._setStatus(`잘 들어봐! (${nth}/2)`);
         c.note.textContent = iAmPerf ? "🎧 이걸 그대로 따라하는 거야!" : `🎧 ${perfNick}이(가) 따라할 소리!`;
         c.main.innerHTML = `<div class="vc-speaker">🔊</div>`;
-        this._playClip(ctx, ctx.now() - state.subAt);
+        // 600ms 리드인 후 재생 — 화면 전환하자마자 지나가버리지 않게
+        const sub = c.lastSub;
+        const late = ctx.now() - state.subAt; // 늦게 합류한 경우 이어듣기
+        c.timers.push(setTimeout(() => {
+          if (this._c === c && c.lastSub === sub) this._playClip(ctx, Math.max(0, late - 600));
+        }, late > 600 ? 0 : 600 - late));
         break;
       }
       case "count":
@@ -2889,6 +2905,11 @@ const voice = {
     const t = ctx.now();
     const lens = voiceSubLens(state.clip);
     const inp = inputs && inputs[state.perf];
+    // 주인공 마이크 준비 완료 → 바로 듣기 시작 (팝업이 듣기를 덮치지 않게)
+    if (state.sub === "prep" && inp && (inp.micready || inp.recfail)) {
+      ctx.writeState({ sub: "listen1", subAt: t });
+      return;
+    }
     if (state.sub === "waitrec") {
       if (inp && inp.recfail) { ctx.writeState({ sub: "score", subAt: t }); return; }
       if (inp && inp.rec) { ctx.writeState({ sub: "playback", subAt: t }); return; }
