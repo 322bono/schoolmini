@@ -2,7 +2,7 @@
 import { COLORS, MAX_PLAYERS, MAX_PLAYERS_MIN, MAX_PLAYERS_MAX } from "./config.js";
 import * as net from "./net.js";
 import { qrSvg } from "./qr.js";
-import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails } from "./sfx.js";
+import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails, resumeAudio } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 
@@ -1303,6 +1303,9 @@ window.__sm = {
 // 초기화 / 이벤트 연결
 // ═════════════════════════════════════════════
 document.addEventListener("pointerdown", unlockAudio, { once: true });
+// iOS에서 마이크·전화·시리 등으로 오디오가 중단됐을 때 터치/화면 복귀 시 자동 복구
+document.addEventListener("pointerdown", resumeAudio);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) resumeAudio(); });
 
 $("btnMute").textContent = isMuted() ? "🔇" : "🔊";
 $("btnMute").addEventListener("click", () => {

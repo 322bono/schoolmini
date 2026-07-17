@@ -10,8 +10,14 @@ function ac() {
     master.gain.value = muted ? 0 : 0.5;
     master.connect(ctx.destination);
   }
-  if (ctx.state === "suspended") ctx.resume();
+  // iOS는 마이크 사용/전화 등으로 컨텍스트를 "interrupted" 상태로 만들기도 한다
+  if (ctx.state !== "running") { try { ctx.resume().catch(() => {}); } catch { /* noop */ } }
   return ctx;
+}
+
+/** 오디오 컨텍스트 강제 재개 — 마이크 해제 후, 화면 복귀 후 등 */
+export function resumeAudio() {
+  try { ac(); } catch { /* noop */ }
 }
 
 // 첫 사용자 입력에서 오디오 잠금 해제 (모바일 필수)

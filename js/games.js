@@ -9,7 +9,7 @@
 //   hostEarlyEnd(ctx, i, s)    : 조기 종료 조건 → false | 지연ms
 //   evaluate(ctx, i, s)        : {outcome:{uid:'win'|'lose'}, detail:{uid:문구}}
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { sfx, playDrumroll, cdTick, gameStartFx, loadUrlBuffer, decodeB64Audio, playBuffer } from "./sfx.js";
+import { sfx, playDrumroll, cdTick, gameStartFx, loadUrlBuffer, decodeB64Audio, playBuffer, resumeAudio } from "./sfx.js";
 
 // ── 공통 헬퍼 ────────────────────────────────
 function shuffle(arr) {
@@ -2652,27 +2652,46 @@ const voice = {
   },
 
   // ── 주인공 전용: 마이크 준비/녹음/분석 ──
+  // 핵심: iOS는 마이크가 "켜져 있는 동안" 페이지의 오디오 출력을 중단시킨다.
+  // 그래서 여기서는 권한만 받고 마이크를 즉시 끈다 — 실제로 켜는 건 녹음 순간뿐.
   async _prepMic() {
     const c = this._c;
-    if (!c || c.stream || c.micFail) return;
+    if (!c || c.micOk || c.micFail) return;
     try {
       if (!navigator.mediaDevices || !window.MediaRecorder) throw new Error("unsupported");
-      c.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach(tr => tr.stop()); // 권한 확보 후 즉시 해제
+      c.micOk = true;
     } catch { c.micFail = true; }
+    resumeAudio(); // 마이크 사용으로 중단됐을 수 있는 출력 복구
   },
 
-  _startRec(ctx) {
+  _releaseMic() {
+    const c = this._c;
+    if (c && c.stream) {
+      try { c.stream.getTracks().forEach(tr => tr.stop()); } catch { /* noop */ }
+      c.stream = null;
+    }
+    resumeAudio();
+  },
+
+  async _startRec(ctx) {
     const c = this._c;
     if (!c) return;
-    if (c.micFail || !c.stream) { ctx.writeInput({ recfail: 1 }); return; }
+    if (c.micFail || !navigator.mediaDevices || !window.MediaRecorder) { ctx.writeInput({ recfail: 1 }); return; }
     try {
+      // 권한은 이미 받아둠 → 프롬프트 없이 즉시 켜짐
+      c.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", ""].find(m => !m || MediaRecorder.isTypeSupported(m));
       c.recorder = new MediaRecorder(c.stream, mime ? { mimeType: mime } : undefined);
       c.chunks = [];
       c.recorder.ondataavailable = e => { if (e.data && e.data.size) c.chunks.push(e.data); };
-      c.recorder.onstop = () => this._processRec(ctx).catch(() => ctx.writeInput({ recfail: 1 }));
+      c.recorder.onstop = () => this._processRec(ctx).catch(() => { ctx.writeInput({ recfail: 1 }); this._releaseMic(); });
       c.recorder.start();
-    } catch { ctx.writeInput({ recfail: 1 }); }
+    } catch {
+      this._releaseMic();
+      ctx.writeInput({ recfail: 1 });
+    }
   },
 
   _stopRec() {
@@ -2687,6 +2706,7 @@ const voice = {
     const state = ctx.state();
     if (!c || c.processed || !state) return;
     c.processed = true;
+    this._releaseMic(); // 녹음 끝 → 마이크 즉시 끄고 스피커 출력 복구
     const blob = new Blob(c.chunks);
     if (!blob.size) { ctx.writeInput({ recfail: 1 }); return; }
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -2703,6 +2723,7 @@ const voice = {
       ctx.writeInput({ rec: voiceWavB64(rec16), sc });
     } finally {
       ac.close().catch(() => {});
+      resumeAudio();
     }
   },
 
