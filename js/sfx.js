@@ -23,22 +23,24 @@ export function unlockAudio() {
 }
 
 // iOS는 제스처 없이 만들어진 오디오 요소의 재생을 막을 수 있다.
-// 첫 터치(제스처) 안에서 모든 음악 요소를 무음으로 잠깐 재생해 미리 허가를 받아둠.
+// 첫 터치(제스처) 안에서 재사용 요소를 "몇십 바이트짜리 무음"으로 활성화해 두면
+// 이후 어떤 곡으로 src를 바꿔도 재생이 허용된다 — 곡을 미리 받을 필요가 없음.
+const SILENT_WAV = "data:audio/wav;base64,UklGRjQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YRAAAAAAAAAAAAAAAAAAAAAAAAAA";
 let musicPrimed = false;
 function primeMusic() {
   if (musicPrimed) return;
   musicPrimed = true;
-  for (const track of Object.keys(MUSIC_SRC)) {
-    try {
-      const el = musicFor(track);
-      el.muted = true;
-      const p = el.play();
-      if (p && p.then) {
-        p.then(() => { el.pause(); el.currentTime = 0; el.muted = false; })
-          .catch(() => { el.muted = false; });
-      } else { el.pause(); el.muted = false; }
-    } catch { /* noop */ }
-  }
+  try {
+    const el = ensureMusicEl();
+    el.src = SILENT_WAV;
+    el._track = null;
+    el.muted = true;
+    const p = el.play();
+    if (p && p.then) {
+      p.then(() => { el.pause(); el.muted = false; })
+        .catch(() => { el.muted = false; });
+    } else { el.pause(); el.muted = false; }
+  } catch { /* noop */ }
 }
 
 export function isMuted() { return muted; }
@@ -47,10 +49,10 @@ export function toggleMute() {
   localStorage.setItem("sm_muted", muted ? "1" : "0");
   if (master) master.gain.value = muted ? 0 : 0.5;
   syncBgm();
-  // 라운드/시상식 음악도 음소거 연동
-  if (muted) { for (const el of Object.values(musicEls)) el.pause(); }
-  else if (roundStarted && roundTrack) musicFor(roundTrack).play().catch(() => {});
-  else if (podiumOn) musicFor("podium").play().catch(() => {});
+  // 라운드/시상식 음악도 음소거 연동 (재개는 이어듣기 — 처음부터 다시 X)
+  if (muted) { if (musicEl) musicEl.pause(); }
+  else if (roundStarted && roundTrack) resumeTrack(roundTrack);
+  else if (podiumOn) resumeTrack("podium");
   return muted;
 }
 
@@ -164,7 +166,9 @@ export const playHit = () => playBuf("hit", 0.95);
 export const cdTick = () => playBuf("count", 0.65);
 
 // ── 라운드 음악 (게임 시작~결과 전까지) ─────────
-let musicEls = {};
+// 오디오 요소 하나를 재사용: 첫 터치 때 무음으로 활성화(iOS 허가)해 두고,
+// 실제 곡은 재생 순간에 src만 바꿔서 스트리밍 — 안 듣는 곡은 다운로드 자체가 없다.
+let musicEl = null;
 let roundTrack = null;
 let roundStarted = false;
 
@@ -174,14 +178,36 @@ const MUSIC_SRC = {
   podium: "assets/bgm-podium.mp3"
 };
 
-function musicFor(track) {
-  if (!musicEls[track]) {
-    const el = new Audio(MUSIC_SRC[track] || MUSIC_SRC.sunny);
-    el.loop = true;
-    el.volume = 0.32;
-    musicEls[track] = el;
+function ensureMusicEl() {
+  if (!musicEl) {
+    musicEl = new Audio();
+    musicEl.loop = true;
+    musicEl.volume = 0.32;
   }
-  return musicEls[track];
+  return musicEl;
+}
+
+/** 해당 트랙을 처음부터 재생 (필요할 때만 로드) */
+function playTrack(track) {
+  const el = ensureMusicEl();
+  const src = MUSIC_SRC[track];
+  if (!src) return;
+  if (el._track !== track) {
+    el.src = src;
+    el._track = track;
+  } else {
+    el.currentTime = 0;
+  }
+  el.muted = false;
+  el.play().catch(() => {});
+}
+
+/** 음소거 해제 시 이어서 재생 (트랙이 이미 걸려 있으면 그 지점부터) */
+function resumeTrack(track) {
+  const el = ensureMusicEl();
+  if (el._track !== track) { playTrack(track); return; }
+  el.muted = false;
+  el.play().catch(() => {});
 }
 
 /** 이번 라운드에 쓸 음악 예약 (play 페이즈 진입 시 호출) */
@@ -195,11 +221,7 @@ export function gameStartFx() {
   if (roundStarted) return;
   roundStarted = true;
   playYay();
-  if (roundTrack && !muted) {
-    const el = musicFor(roundTrack);
-    el.currentTime = 0;
-    el.play().catch(() => {});
-  }
+  if (roundTrack && !muted) playTrack(roundTrack);
 }
 
 let podiumOn = false;
@@ -208,16 +230,14 @@ let podiumOn = false;
 export function playPodiumMusic() {
   podiumOn = true;
   if (muted) return;
-  const el = musicFor("podium");
-  el.currentTime = 0;
-  el.play().catch(() => {});
+  playTrack("podium");
 }
 
 export function stopRoundMusic() {
   roundTrack = null;
   roundStarted = false;
   podiumOn = false;
-  for (const el of Object.values(musicEls)) el.pause();
+  if (musicEl) musicEl.pause();
 }
 
 function osc({ type = "sine", freq = 440, to = null, dur = 0.15, vol = 0.5, delay = 0, curve = "exp" }) {
