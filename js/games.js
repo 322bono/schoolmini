@@ -1857,7 +1857,7 @@ const wake = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { map: {}, lastTurn: -1, lastTurnStartAt: 0, answered: {}, wokeShown: false, lastStackShown: undefined, layoutDone: false };
+    const c = this._c = { map: {}, lastTurn: -1, lastTurnStartAt: 0, answered: {}, wokeShown: false, lastStackShown: undefined, layoutDone: false, freezeKey: 0, freezePos: null };
     stage.innerHTML = `
       <div class="wk-wrap">
         <div class="wk-dog" id="wkDog">🐶<span class="wk-zzz">💤</span></div>
@@ -1908,6 +1908,35 @@ const wake = {
     }
   },
 
+  /**
+   * 멈춘 위치를 게임 상태에 직접 트랜잭션으로 적용.
+   * 방장 릴레이를 안 거치므로 방장이 아니어도 지연 없이 판정된다.
+   * turnKey(턴 시작 시각) 검증으로 같은 턴이 두 번 처리될 수 없음.
+   */
+  _applyStop(ctx, pid, pos, turnKey) {
+    return ctx.txn("game/state", cur => {
+      if (!cur || cur.awake || cur.done || !cur.order || !cur.order.length) return;
+      if (cur.turnStartAt !== turnKey) return; // 이미 처리된 턴
+      if (cur.order[cur.turn % cur.order.length] !== pid) return;
+      const zone = wakeZoneAt(pos);
+      const stack = cur.stack + WAKE_ZONE_STACK[zone];
+      if (stack > cur.threshold) {
+        return Object.assign({}, cur, {
+          stack, lastZone: zone, awake: true,
+          out: Object.assign({}, cur.out, { [pid]: 1 })
+        });
+      }
+      const turnsTaken = (cur.turnsTaken || 0) + 1;
+      if (turnsTaken >= WAKE_MAX_TURNS) {
+        return Object.assign({}, cur, { stack, lastZone: zone, done: true, turnsTaken });
+      }
+      return Object.assign({}, cur, {
+        stack, lastZone: zone, turn: cur.turn + 1, turnsTaken,
+        turnStartAt: ctx.now() + WAKE_TURN_GAP
+      });
+    });
+  },
+
   _tryStop(ctx) {
     const c = this._c;
     const state = ctx.state();
@@ -1915,10 +1944,14 @@ const wake = {
     if (state.order[state.turn % state.order.length] !== ctx.uid) return;
     if (c.answered[state.turnStartAt]) return;
     c.answered[state.turnStartAt] = true;
-    const pos = wakeSwingPos(ctx.now() - state.turnStartAt);
-    ctx.writeInput({ pos: Math.round(pos * 10) / 10, turnKey: state.turnStartAt });
+    const pos = Math.round(wakeSwingPos(ctx.now() - state.turnStartAt) * 10) / 10;
+    // 즉각 로컬 피드백: 바늘을 그 자리에 바로 멈춤 (판정 결과는 트랜잭션으로 공유)
+    c.freezeKey = state.turnStartAt;
+    c.freezePos = pos;
     sfx.click();
     if (c.btn) c.btn.disabled = true;
+    ctx.writeInput({ pos, turnKey: state.turnStartAt }); // 예비 경로 (방장 릴레이)
+    this._applyStop(ctx, ctx.uid, pos, state.turnStartAt).catch(() => {});
   },
 
   _tick(ctx) {
@@ -1954,7 +1987,9 @@ const wake = {
     c.meterFill.style.width = Math.min(100, (state.stack / (WAKE_MAX_TURNS * WAKE_ZONE_STACK.green)) * 100) + "%";
     if (t >= state.turnStartAt) {
       c.needle.style.opacity = 1;
-      c.needle.style.left = wakeSwingPos(t - state.turnStartAt) + "%";
+      // 내가 멈췄으면 그 자리에 고정 표시 (다음 턴이 오면 자동 해제)
+      const frozen = c.freezeKey === state.turnStartAt && typeof c.freezePos === "number";
+      c.needle.style.left = (frozen ? c.freezePos : wakeSwingPos(t - state.turnStartAt)) + "%";
     }
   },
 
@@ -1991,34 +2026,20 @@ const wake = {
     (zone === "red" ? sfx.wrong : zone === "orange" ? sfx.beep : sfx.correct)();
   },
 
-  // 호스트: 현재 차례인 사람의 입력(또는 타임아웃 시 자동)을 처리 → 스택 갱신, 넘으면 각성
+  // 호스트: 예비 릴레이(트랜잭션 실패 시) + 잠수/봇 타임아웃 자동 처리
   hostTick(ctx, state, inputs) {
     if (!state || !state.turnStartAt || state.awake || state.done || !state.order || !state.order.length) return;
     const t = ctx.now();
     if (t < state.turnStartAt) return;
-    const order = state.order;
-    const activePid = order[state.turn % order.length];
+    const activePid = state.order[state.turn % state.order.length];
     inputs = inputs || {};
     const inp = inputs[activePid];
-    let pos = null;
     if (inp && typeof inp.pos === "number" && inp.turnKey === state.turnStartAt) {
-      pos = inp.pos;
+      this._applyStop(ctx, activePid, inp.pos, state.turnStartAt).catch(() => {});
     } else if (t - state.turnStartAt > WAKE_AUTO_MS) {
-      pos = Math.random() * 100; // 너무 오래 끌면 자동으로 아무 데나 멈춤
+      // 너무 오래 끌면 자동으로 아무 데나 멈춤
+      this._applyStop(ctx, activePid, Math.random() * 100, state.turnStartAt).catch(() => {});
     }
-    if (pos === null) return;
-    const zone = wakeZoneAt(pos);
-    const stack = state.stack + WAKE_ZONE_STACK[zone];
-    if (stack > state.threshold) {
-      ctx.writeState({ stack, awake: true, lastZone: zone, out: Object.assign({}, state.out, { [activePid]: 1 }) });
-      return;
-    }
-    const turnsTaken = (state.turnsTaken || 0) + 1;
-    if (turnsTaken >= WAKE_MAX_TURNS) {
-      ctx.writeState({ stack, done: true, lastZone: zone, turnsTaken });
-      return;
-    }
-    ctx.writeState({ stack, turn: state.turn + 1, turnsTaken, lastZone: zone, turnStartAt: ctx.now() + WAKE_TURN_GAP });
   },
   hostEarlyEnd(ctx, inputs, state) {
     if (!state) return false;
@@ -2411,6 +2432,487 @@ const spin = {
 };
 
 // ═════════════════════════════════════════════
+// 15. 성대모사!
+// ═════════════════════════════════════════════
+const VOICE_CLIPS = [
+  { file: "assets/voice1.mp3", dur: 1900 },
+  { file: "assets/voice2.mp3", dur: 6450 },
+  { file: "assets/voice3.mp3", dur: 1900 },
+  { file: "assets/voice4.mp3", dur: 1550 }
+];
+const VOICE_PASS = 70;
+// 채점 요소: [키, 라벨, 만점]
+const VOICE_ELEMS = [["p", "음높이", 30], ["i", "억양", 30], ["r", "리듬", 25], ["l", "길이", 15]];
+
+function voiceRecDur(clip) { return Math.max(4000, VOICE_CLIPS[clip].dur + 2000); }
+function voiceSubLens(clip) {
+  const dur = VOICE_CLIPS[clip].dur;
+  const rec = voiceRecDur(clip);
+  return {
+    roulette: 4200, listen1: dur + 1200, listen2: dur + 1200, count: 3200,
+    record: rec + 400, waitrec: 8000, playback: rec + 800, overlay: rec + 800, score: 11500
+  };
+}
+const VOICE_SUB_ORDER = ["roulette", "listen1", "listen2", "count", "record", "waitrec", "playback", "overlay", "score"];
+
+/** AudioBuffer → 16kHz 모노 Float32 (분석·전송 공용 포맷) */
+async function voiceTo16k(buf) {
+  const sr = 16000;
+  const len = Math.max(1, Math.ceil(buf.duration * sr));
+  const oc = new OfflineAudioContext(1, len, sr);
+  const src = oc.createBufferSource();
+  src.buffer = buf;
+  src.connect(oc.destination);
+  src.start();
+  const out = await oc.startRendering();
+  return out.getChannelData(0);
+}
+
+/** 16kHz 모노 Float32 → WAV 바이트 → base64 (모든 기기에서 재생 가능한 공용 포맷) */
+function voiceWavB64(f32) {
+  const sr = 16000;
+  const n = f32.length;
+  const bytes = new Uint8Array(44 + n * 2);
+  const dv = new DataView(bytes.buffer);
+  const wstr = (o, s) => { for (let i = 0; i < s.length; i++) bytes[o + i] = s.charCodeAt(i); };
+  wstr(0, "RIFF"); dv.setUint32(4, 36 + n * 2, true); wstr(8, "WAVE");
+  wstr(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  wstr(36, "data"); dv.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, f32[i])) * 32767, true);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+/** 프레임별 에너지 + 피치(자기상관) 추출 */
+function voiceFeatures(f32) {
+  const sr = 16000;
+  const win = 640, hop = 320; // 40ms 창, 20ms 이동
+  const energies = [], pitches = [];
+  for (let s = 0; s + win <= f32.length; s += hop) {
+    let rms = 0;
+    for (let i = s; i < s + win; i++) rms += f32[i] * f32[i];
+    energies.push(Math.sqrt(rms / win));
+    pitches.push(0);
+  }
+  const maxE = Math.max(1e-6, ...energies);
+  const minLag = Math.floor(sr / 500), maxLag = Math.floor(sr / 70);
+  for (let fi = 0; fi < energies.length; fi++) {
+    if (energies[fi] < maxE * 0.18) continue; // 무성 구간은 스킵
+    const s = fi * hop;
+    let best = 0, bestLag = 0;
+    for (let lag = minLag; lag <= maxLag; lag++) {
+      let sum = 0;
+      for (let i = 0; i < win - lag; i++) sum += f32[s + i] * f32[s + i + lag];
+      if (sum > best) { best = sum; bestLag = lag; }
+    }
+    if (bestLag) pitches[fi] = sr / bestLag;
+  }
+  return { energies, pitches, maxE };
+}
+
+function voiceResampleSeq(arr, n) {
+  if (!arr.length) return new Array(n).fill(0);
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(arr[Math.min(arr.length - 1, Math.floor(i * arr.length / n))]);
+  return out;
+}
+
+function voiceCorr(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (n < 3) return 0;
+  let ma = 0, mb = 0;
+  for (let i = 0; i < n; i++) { ma += a[i]; mb += b[i]; }
+  ma /= n; mb /= n;
+  let num = 0, da = 0, db = 0;
+  for (let i = 0; i < n; i++) {
+    num += (a[i] - ma) * (b[i] - mb);
+    da += (a[i] - ma) ** 2;
+    db += (b[i] - mb) ** 2;
+  }
+  return da && db ? num / Math.sqrt(da * db) : 0;
+}
+
+function voiceMedian(arr) {
+  if (!arr.length) return 0;
+  const s = arr.slice().sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/** 원본 vs 성대모사 채점: 음높이/억양/리듬/길이 → 100점 만점 */
+function computeVoiceScores(ref, rec) {
+  const clamp = x => Math.max(0, Math.min(1, x));
+  const A = voiceFeatures(ref), B = voiceFeatures(rec);
+  const vA = A.pitches.filter(p => p > 0), vB = B.pitches.filter(p => p > 0);
+  const spA = A.energies.filter((e, i) => e > A.maxE * 0.18).length;
+  const spB = B.energies.filter((e, i) => e > B.maxE * 0.18).length;
+
+  // 아예 말을 안 했으면 전부 0점
+  if (!spB || !vB.length) {
+    return { p: 0, i: 0, r: 0, l: 0, total: 0 };
+  }
+
+  // 1) 음높이(30): 목소리 높이 중앙값 비교 (한 옥타브 차이면 0점 근처)
+  const pRatio = Math.abs(Math.log2(voiceMedian(vA) / voiceMedian(vB)));
+  const p = Math.round(30 * clamp(1 - pRatio / 1.0));
+
+  // 2) 억양(30): 피치 곡선 상관 + 높낮이 변화폭 비교
+  const contour = voiceCorr(voiceResampleSeq(vA, 40), voiceResampleSeq(vB, 40));
+  const rangeA = Math.max(...vA) - Math.min(...vA), rangeB = Math.max(...vB) - Math.min(...vB);
+  const rangeSim = clamp(1 - Math.abs(rangeA - rangeB) / Math.max(rangeA, rangeB, 1));
+  const i = Math.round(30 * clamp(0.6 * (contour * 0.5 + 0.5) + 0.4 * rangeSim));
+
+  // 3) 리듬(25): 소리 크기 흐름(엔벨로프) 상관
+  const rr = voiceCorr(voiceResampleSeq(A.energies, 50), voiceResampleSeq(B.energies, 50));
+  const r = Math.round(25 * clamp(rr * 0.65 + 0.35));
+
+  // 4) 길이(15): 발화 길이 비율
+  const l = Math.round(15 * clamp(Math.min(spA, spB) / Math.max(spA, spB, 1)));
+
+  return { p, i, r, l, total: p + i + r + l };
+}
+
+const voice = {
+  id: "voice",
+  name: "성대모사!",
+  tag: "똑같이 따라하면 +2! 못하면 -1!",
+
+  stampOnTimeout: false,
+  noStartFx: true, // 이 게임은 라운드 음악/예이 없음 (신호음만)
+  duration: () => 72500,
+  hostSetup(ctx) {
+    const players = ctx.players();
+    const humans = Object.keys(players).filter(id => !players[id].bot);
+    const pool = humans.length ? humans : Object.keys(players);
+    return {
+      perf: pool[Math.floor(Math.random() * pool.length)],
+      clip: Math.floor(Math.random() * VOICE_CLIPS.length),
+      sub: "roulette",
+      subAt: ctx.playStart
+    };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastSub: "", cdLast: -1, audios: [], timers: [],
+      stream: null, recorder: null, chunks: [], micFail: false, processed: false
+    };
+    stage.innerHTML = `
+      <div class="vc-wrap">
+        <div class="vc-status sketch" id="vcStatus">성대모사 주인공은…?</div>
+        <div class="vc-main" id="vcMain"></div>
+        <div class="vc-board" id="vcBoard" style="display:none"></div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note" id="vcNote">🎤 룰렛으로 뽑힌 한 명이 도전! 나머지는 심사위원!</div>`;
+    c.statusEl = stage.querySelector("#vcStatus");
+    c.main = stage.querySelector("#vcMain");
+    c.board = stage.querySelector("#vcBoard");
+    c.note = stage.querySelector("#vcNote");
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _setStatus(text) {
+    const c = this._c;
+    if (c && c.statusEl && c.statusEl.textContent !== text) c.statusEl.textContent = text;
+  },
+
+  _playClip(ctx, seekMs = 0) {
+    const c = this._c;
+    const state = ctx.state();
+    if (!c || !state) return;
+    try {
+      const a = new Audio(VOICE_CLIPS[state.clip].file);
+      a.volume = 1;
+      if (seekMs > 300) a.currentTime = seekMs / 1000;
+      a.play().catch(() => {});
+      c.audios.push(a);
+    } catch { /* noop */ }
+  },
+
+  _playRec(ctx) {
+    const c = this._c;
+    const state = ctx.state();
+    const inp = state && ctx.inputs() && ctx.inputs()[state.perf];
+    if (!c || !inp || !inp.rec) return null;
+    try {
+      const a = new Audio("data:audio/wav;base64," + inp.rec);
+      a.volume = 1;
+      a.play().catch(() => {});
+      c.audios.push(a);
+      return a;
+    } catch { return null; }
+  },
+
+  _stopAudios() {
+    const c = this._c;
+    if (!c) return;
+    for (const a of c.audios) { try { a.pause(); } catch { /* noop */ } }
+    c.audios = [];
+  },
+
+  // ── 주인공 전용: 마이크 준비/녹음/분석 ──
+  async _prepMic() {
+    const c = this._c;
+    if (!c || c.stream || c.micFail) return;
+    try {
+      if (!navigator.mediaDevices || !window.MediaRecorder) throw new Error("unsupported");
+      c.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch { c.micFail = true; }
+  },
+
+  _startRec(ctx) {
+    const c = this._c;
+    if (!c) return;
+    if (c.micFail || !c.stream) { ctx.writeInput({ recfail: 1 }); return; }
+    try {
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", ""].find(m => !m || MediaRecorder.isTypeSupported(m));
+      c.recorder = new MediaRecorder(c.stream, mime ? { mimeType: mime } : undefined);
+      c.chunks = [];
+      c.recorder.ondataavailable = e => { if (e.data && e.data.size) c.chunks.push(e.data); };
+      c.recorder.onstop = () => this._processRec(ctx).catch(() => ctx.writeInput({ recfail: 1 }));
+      c.recorder.start();
+    } catch { ctx.writeInput({ recfail: 1 }); }
+  },
+
+  _stopRec() {
+    const c = this._c;
+    if (c && c.recorder && c.recorder.state === "recording") {
+      try { c.recorder.stop(); } catch { /* noop */ }
+    }
+  },
+
+  async _processRec(ctx) {
+    const c = this._c;
+    const state = ctx.state();
+    if (!c || c.processed || !state) return;
+    c.processed = true;
+    const blob = new Blob(c.chunks);
+    if (!blob.size) { ctx.writeInput({ recfail: 1 }); return; }
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ac = new AC();
+    try {
+      const recBuf = await ac.decodeAudioData(await blob.arrayBuffer());
+      const refBuf = await ac.decodeAudioData(await (await fetch(VOICE_CLIPS[state.clip].file)).arrayBuffer());
+      // 녹음은 게임 시간 한도까지만 사용
+      const rec16 = (await voiceTo16k(recBuf)).slice(0, Math.ceil(voiceRecDur(state.clip) / 1000 * 16000));
+      const ref16 = await voiceTo16k(refBuf);
+      const sc = computeVoiceScores(ref16, rec16);
+      ctx.writeInput({ rec: voiceWavB64(rec16), sc });
+    } finally {
+      ac.close().catch(() => {});
+    }
+  },
+
+  // ── 진행 (state.sub 기준 화면 전환) ──
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    const iAmPerf = state.perf === ctx.uid;
+    const perfNick = (ctx.players()[state.perf] || {}).nick || "?";
+
+    if (state.sub !== c.lastSub) {
+      const prev = c.lastSub;
+      c.lastSub = state.sub;
+      this._stopAudios();
+      if (prev === "record") this._stopRec();
+      this._enterSub(ctx, state, iAmPerf, perfNick);
+    }
+
+    // 진행 중 갱신이 필요한 sub들
+    if (state.sub === "roulette") {
+      if (t - state.subAt > 3300 && !c.rouletteDone) {
+        c.rouletteDone = true;
+        clearInterval(c.roulInt);
+        c.main.innerHTML = "";
+        const el = makeChar({ color: ctx.colorOf(state.perf), nick: perfNick, size: 84, face: "shock" });
+        c.main.appendChild(el);
+        this._setStatus(`🎤 ${iAmPerf ? "내가 주인공!!" : perfNick + " 당첨!!"}`);
+        sfx.bbam();
+        if (iAmPerf) this._prepMic(); // 마이크 권한 미리 요청
+      }
+    } else if (state.sub === "count") {
+      const n = Math.ceil((state.subAt + 3200 - t) / 1000);
+      if (n >= 1 && n <= 3 && n !== c.cdLast) { c.cdLast = n; cdTick(); this._setStatus(`${n}…`); }
+    } else if (state.sub === "record") {
+      const remain = Math.max(0, (state.subAt + voiceRecDur(state.clip)) - t);
+      const bar = c.main.querySelector(".vc-recbar-fill");
+      if (bar) bar.style.width = (remain / voiceRecDur(state.clip) * 100) + "%";
+    } else if (state.sub === "score") {
+      this._tickScore(ctx, state, t - state.subAt, perfNick);
+    }
+  },
+
+  _enterSub(ctx, state, iAmPerf, perfNick) {
+    const c = this._c;
+    const dur = VOICE_CLIPS[state.clip].dur;
+    c.main.innerHTML = "";
+    c.board.style.display = "none";
+    switch (state.sub) {
+      case "roulette": {
+        this._setStatus("성대모사 주인공은…?");
+        c.main.innerHTML = `<div class="vc-roul sketch" id="vcRoul">???</div>`;
+        const names = Object.values(ctx.players()).map(p => p.nick);
+        let ri = 0;
+        c.roulInt = setInterval(() => {
+          const el = c.main.querySelector("#vcRoul");
+          if (el) { el.textContent = names[ri++ % names.length]; sfx.tick(); }
+        }, 95);
+        c.timers.push(c.roulInt);
+        break;
+      }
+      case "listen1":
+      case "listen2": {
+        const nth = state.sub === "listen1" ? 1 : 2;
+        this._setStatus(`잘 들어봐! (${nth}/2)`);
+        c.note.textContent = iAmPerf ? "🎧 이걸 그대로 따라하는 거야!" : `🎧 ${perfNick}이(가) 따라할 소리!`;
+        c.main.innerHTML = `<div class="vc-speaker">🔊</div>`;
+        this._playClip(ctx, ctx.now() - state.subAt);
+        break;
+      }
+      case "count":
+        this._setStatus("3…");
+        c.cdLast = -1;
+        c.note.textContent = iAmPerf ? "🎙 곧 녹음 시작! 목 가다듬어!" : "🤫 조용! 곧 시작해!";
+        c.main.innerHTML = `<div class="vc-speaker">🎙</div>`;
+        break;
+      case "record":
+        if (iAmPerf) {
+          this._setStatus("지금 따라해!! 🎙");
+          c.note.textContent = "🔴 녹음 중!! 최대한 똑같이!";
+          this._startRec(ctx);
+        } else {
+          this._setStatus(`${perfNick}이(가) 성대모사 중…!`);
+          c.note.textContent = "🤫 절대 조용!! 웃음 참기!!";
+        }
+        c.main.innerHTML = `
+          <div class="vc-mic${iAmPerf ? " vc-recing" : ""}">🎙</div>
+          <div class="vc-recbar sketch"><div class="vc-recbar-fill" style="width:100%"></div></div>`;
+        break;
+      case "waitrec":
+        this._setStatus("녹음 정리 중… 📼");
+        c.note.textContent = "잠시만!";
+        c.main.innerHTML = `<div class="vc-speaker">📼</div>`;
+        break;
+      case "playback":
+        this._setStatus("들어보자!! 🔊");
+        c.note.textContent = `🎧 ${perfNick}의 성대모사!`;
+        c.main.innerHTML = `<div class="vc-speaker">🔊</div>`;
+        this._playRec(ctx);
+        break;
+      case "overlay":
+        this._setStatus("동시 재생!! 얼마나 비슷할까?");
+        c.note.textContent = "🎧 원본 + 성대모사 동시에!";
+        c.main.innerHTML = `<div class="vc-speaker">🔊🔊</div>`;
+        this._playClip(ctx, 0);
+        this._playRec(ctx);
+        break;
+      case "score":
+        c.scoreShown = {};
+        c.note.textContent = "과연 결과는…?!";
+        this._setStatus("채점 중…");
+        c.main.innerHTML = "";
+        c.board.style.display = "";
+        c.board.innerHTML = VOICE_ELEMS.map(([k, label, max]) =>
+          `<div class="vc-row" data-k="${k}"><span class="vc-lbl">${label}</span><span class="vc-pts" id="vcPts-${k}">?? / ${max}</span></div>`
+        ).join("") + `<div class="vc-total" id="vcTotal"></div><div class="vc-verdict" id="vcVerdict"></div>`;
+        playDrumroll();
+        break;
+    }
+  },
+
+  /** 점수 공개 연출: 두구두구 → 요소별 순차 공개 → 총점 → +2/-1 판정 */
+  _tickScore(ctx, state, e, perfNick) {
+    const c = this._c;
+    const inp = ctx.inputs() && ctx.inputs()[state.perf];
+    const sc = (inp && inp.sc) || { p: 0, i: 0, r: 0, l: 0, total: 0 };
+    VOICE_ELEMS.forEach(([k, label, max], idx) => {
+      const at = 2200 + idx * 1600;
+      if (e >= at && !c.scoreShown[k]) {
+        c.scoreShown[k] = true;
+        const el = c.board.querySelector(`#vcPts-${k}`);
+        if (el) {
+          el.textContent = `${sc[k]} / ${max}`;
+          el.parentElement.classList.add("vc-revealed");
+        }
+        sfx.pop();
+      }
+    });
+    if (e >= 2200 + VOICE_ELEMS.length * 1600 + 400 && !c.scoreShown.total) {
+      c.scoreShown.total = true;
+      const pass = sc.total >= VOICE_PASS;
+      c.board.querySelector("#vcTotal").textContent = `총점 ${sc.total} / 100`;
+      const v = c.board.querySelector("#vcVerdict");
+      v.textContent = pass ? `합격!! ${perfNick} +2 🎉` : `기준 미달… ${perfNick} -1 😭`;
+      v.classList.add(pass ? "vc-pass" : "vc-fail");
+      this._setStatus(pass ? "인정!! 👏" : "아쉽다…!");
+      (pass ? sfx.tada : sfx.fail)();
+    }
+  },
+
+  onState() {},
+  onInputs() {},
+
+  // 호스트: 시간표대로 sub 진행 (녹음 업로드는 도착하는 대로)
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    const lens = voiceSubLens(state.clip);
+    const inp = inputs && inputs[state.perf];
+    if (state.sub === "waitrec") {
+      if (inp && inp.recfail) { ctx.writeState({ sub: "score", subAt: t }); return; }
+      if (inp && inp.rec) { ctx.writeState({ sub: "playback", subAt: t }); return; }
+    }
+    if (t < state.subAt + lens[state.sub]) return;
+    if (state.sub === "score") return; // 종료는 hostEarlyEnd가
+    const idx = VOICE_SUB_ORDER.indexOf(state.sub);
+    let next = VOICE_SUB_ORDER[idx + 1];
+    if (state.sub === "waitrec") next = "score"; // 업로드가 끝내 안 오면 0점 처리
+    if (!next) return;
+    ctx.writeState({ sub: next, subAt: t });
+  },
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || state.sub !== "score") return false;
+    return ctx.now() > state.subAt + 11000 ? 900 : false;
+  },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const perf = state ? state.perf : null;
+    const sc = perf && inputs[perf] && inputs[perf].sc;
+    const total = sc ? sc.total : 0;
+    const pass = total >= VOICE_PASS;
+    const outcome = {}, detail = {}, delta = {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (pid === perf) {
+        outcome[pid] = pass ? "win" : "lose";
+        detail[pid] = `${total}점 — ${pass ? "성대모사 인정!! 🎤 +2" : "기준 미달… -1"}`;
+        delta[pid] = pass ? 2 : -1;
+      } else {
+        outcome[pid] = "mid";
+        detail[pid] = "심사위원 (±0)";
+        delta[pid] = 0;
+      }
+    }
+    return { outcome, detail, delta };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    c.timers.forEach(clearInterval);
+    clearInterval(c.roulInt);
+    this._stopAudios();
+    this._stopRec();
+    if (c.stream) { try { c.stream.getTracks().forEach(tr => tr.stop()); } catch { /* noop */ } }
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -2579,5 +3081,15 @@ spin.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin };
+voice.demo = () => {
+  const d = dmStage("dm-voice");
+  d.appendChild(dmAt(dmProp("dm-vc-spk", "🔊"), "22%", "12%"));
+  d.appendChild(dmAt(dmProp("dm-vc-note", "♪"), "34%", "6%"));
+  d.appendChild(dmAt(dmChar(2, "dm-vc-singer", 48), "56%", "30%"));
+  d.appendChild(dmAt(dmProp("dm-vc-mic", "🎙"), "76%", "34%"));
+  d.appendChild(dmAt(dmProp("dm-vc-score", "채점: 똑같으면 +2!"), "50%", "84%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice };

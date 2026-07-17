@@ -902,6 +902,33 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .sp-arrow { font-size: 1.5rem; color: var(--ink-soft); animation: spArrow 0.8s ease-in-out infinite; }
 @keyframes spArrow { 50% { transform: translateY(9px); opacity: 0.5; } }
 
+/* ── 성대모사! ────────────────────────────── */
+.vc-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 0.5rem; }
+.vc-status { font-size: clamp(1.3rem, 5.5vw, 1.8rem); font-weight: 700; padding: 0.15em 0.8em; text-align: center; }
+.vc-main { display: flex; flex-direction: column; align-items: center; gap: 0.8rem; min-height: 120px; justify-content: center; }
+.vc-roul { font-size: 2.2rem; font-weight: 700; padding: 0.05em 0.8em; }
+.vc-speaker { font-size: 4.5rem; animation: vcPulse 0.9s ease-in-out infinite; }
+.vc-mic { font-size: 4.5rem; }
+.vc-mic.vc-recing { animation: vcRec 0.6s ease-in-out infinite; filter: drop-shadow(0 0 14px rgba(224, 71, 47, 0.8)); }
+@keyframes vcPulse { 50% { transform: scale(1.12); } }
+@keyframes vcRec { 50% { transform: scale(1.15) rotate(-4deg); } }
+.vc-recbar { width: min(340px, 80vw); height: 16px; overflow: hidden; }
+.vc-recbar-fill { height: 100%; background: linear-gradient(90deg, var(--red), #f07f2d); transition: width 0.2s linear; }
+.vc-board { width: min(420px, 92vw); display: flex; flex-direction: column; gap: 0.45rem; }
+.vc-row {
+  display: flex; justify-content: space-between; align-items: center;
+  border: 3px solid var(--ink); border-radius: var(--r2);
+  background: var(--paper-2); padding: 0.25em 0.9em;
+  font-size: 1.15rem; opacity: 0.45;
+}
+.vc-row.vc-revealed { opacity: 1; animation: vcRowPop 0.35s cubic-bezier(0.2, 1.8, 0.4, 1); }
+@keyframes vcRowPop { 40% { transform: scale(1.06); } }
+.vc-row .vc-pts { font-weight: 700; color: var(--blue); }
+.vc-total { text-align: center; font-size: 1.6rem; font-weight: 700; margin-top: 0.3rem; min-height: 1.3em; }
+.vc-verdict { text-align: center; font-size: clamp(1.5rem, 6.5vw, 2.2rem); font-weight: 700; min-height: 1.3em; }
+.vc-verdict.vc-pass { color: var(--green); animation: vcRowPop 0.45s cubic-bezier(0.2, 1.8, 0.4, 1); }
+.vc-verdict.vc-fail { color: var(--red); animation: twShake 0.5s; }
+
 /* ── 게임 소개 데모 (그림 애니메이션) ───────── */
 .demo { position: relative; width: min(300px, 80vw); height: 150px; }
 .demo .char { position: absolute; }
@@ -1042,6 +1069,16 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .dm-sp-hand { font-size: 1.5rem; animation: dmSpHand 0.55s ease-in infinite; }
 @keyframes dmSpHand { 0% { transform: translate(-50%, -6px); opacity: 1; } 100% { transform: translate(-50%, 34px); opacity: 0; } }
 .dm-sp-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* 성대모사: 듣고 → 따라하고 → 채점 */
+.dm-vc-spk { font-size: 2rem; animation: vcPulse 0.9s ease-in-out infinite; }
+.dm-vc-note { font-size: 1.3rem; color: var(--blue); opacity: 0; animation: dmVcNote 1.8s linear infinite; }
+@keyframes dmVcNote { 0% { opacity: 0; transform: translate(-50%, 6px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -18px); } }
+.dm-vc-singer .char-box { animation: dmVcSing 0.8s ease-in-out infinite; }
+@keyframes dmVcSing { 50% { transform: translateY(-6%) rotate(-3deg); } }
+.dm-vc-mic { font-size: 1.7rem; animation: dmVcMic 0.8s ease-in-out infinite; }
+@keyframes dmVcMic { 50% { transform: translateX(-50%) scale(1.15); } }
+.dm-vc-score { font-size: 0.95rem; color: var(--ink-soft); }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {

@@ -815,7 +815,8 @@ async function runResult(token) {
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
-  tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이"
+  tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
+  voice: "성대모사"
 };
 
 // 최종 리더보드
