@@ -112,6 +112,20 @@ function setupMascot() {
 }
 
 // ── 입장(만들기/참가) ─────────────────────────
+// 방 만들기 옵션 (마지막 선택 기억)
+let createMax = Math.max(MAX_PLAYERS_MIN, Math.min(MAX_PLAYERS_MAX, Number(localStorage.getItem("sm_maxp")) || MAX_PLAYERS));
+let createChat = localStorage.getItem("sm_chat") !== "0";
+let createEmote = localStorage.getItem("sm_emote") !== "0";
+
+function renderCreateOpts() {
+  $("cMaxVal").textContent = createMax;
+  const bc = $("btnOptChat"), be = $("btnOptEmote");
+  bc.textContent = createChat ? "허용" : "금지";
+  bc.classList.toggle("off", !createChat);
+  be.textContent = createEmote ? "허용" : "금지";
+  be.classList.toggle("off", !createEmote);
+}
+
 function openEntry(mode) {
   entryMode = mode;
   $("entryTitle").textContent = mode === "create" ? "게임 만들기" : "게임 참가하기";
@@ -119,6 +133,8 @@ function openEntry(mode) {
     ? "친구들에게 보여줄 닉네임을 정해줘!"
     : "닉네임이랑 친구가 알려준 방 코드를 입력해!";
   $("inpCode").style.display = mode === "create" ? "none" : "";
+  $("createOpts").style.display = mode === "create" ? "" : "none";
+  if (mode === "create") renderCreateOpts();
   $("btnEntryGo").textContent = mode === "create" ? "만들기!" : "참가하기!";
   $("inpNick").value = localStorage.getItem("sm_nick") || "";
   showScreen("scr-entry");
@@ -133,7 +149,7 @@ async function submitEntry() {
   try {
     localStorage.setItem("sm_nick", nick);
     if (entryMode === "create") {
-      const code = await net.createRoom(nick);
+      const code = await net.createRoom(nick, { maxPlayers: createMax, allowChat: createChat, allowEmote: createEmote });
       enterRoom(code);
     } else {
       const code = net.normalizeCode($("inpCode").value);
@@ -270,7 +286,9 @@ function renderLobbyMeta() {
   $("hostControls").style.display = isHost ? "flex" : "none";
   $("guestNotice").style.display = isHost ? "none" : "";
   $("roundsVal").textContent = meta.rounds || 4;
-  $("maxVal").textContent = meta.maxPlayers || MAX_PLAYERS;
+  // 방 설정에 따라 채팅/감정표현 숨김
+  document.querySelector(".lobby-chat").style.display = meta.allowChat === false ? "none" : "";
+  $("btnEmote").style.display = meta.allowEmote === false ? "none" : "";
   const start = $("btnStart");
   start.disabled = n < 2;
   start.title = n < 2 ? "2명부터 시작할 수 있어!" : "";
@@ -423,6 +441,8 @@ let lastChatSent = 0;
 
 function handleEmotesAndChat() {
   if (curScreen !== "scr-lobby") return;
+  const emoteOk = !meta || meta.allowEmote !== false;
+  const chatOk = !meta || meta.allowChat !== false;
   const nowMs = net.now();
   for (const [pid, p] of Object.entries(playersCache)) {
     const em = p.emote;
@@ -430,13 +450,13 @@ function handleEmotesAndChat() {
       // 입장 전에 쌓여 있던 낡은 값(8초 초과)은 기록만 하고 재생 안 함
       const fresh = emoteSeen[pid] !== undefined || nowMs - em.t < 8000;
       emoteSeen[pid] = em.t;
-      if (fresh) playEmote(pid, em.k);
+      if (fresh && emoteOk) playEmote(pid, em.k);
     }
     const sy = p.say;
     if (sy && sy.t && saySeen[pid] !== sy.t) {
       const fresh = saySeen[pid] !== undefined || nowMs - sy.t < 8000;
       saySeen[pid] = sy.t;
-      if (fresh && wander[pid]) charSay(wander[pid].el, String(sy.m || "").slice(0, 40), 3500);
+      if (fresh && chatOk && wander[pid]) charSay(wander[pid].el, String(sy.m || "").slice(0, 40), 3500);
     }
   }
 }
@@ -504,6 +524,7 @@ function playEmote(pid, k) {
 
 function sendEmote(k) {
   if (!room || curScreen !== "scr-lobby") return;
+  if (meta && meta.allowEmote === false) return;
   const nowMs = Date.now();
   if (nowMs < emoteCdUntil) return;
   emoteCdUntil = nowMs + EMOTE_CD_MS;
@@ -516,6 +537,7 @@ function sendEmote(k) {
 
 function sendChat() {
   if (!room || curScreen !== "scr-lobby") return;
+  if (meta && meta.allowChat === false) return;
   const inp = $("inpChat");
   const msg = inp.value.trim().slice(0, 40);
   if (!msg) return;
@@ -1311,17 +1333,30 @@ $("btnRoundPlus").addEventListener("click", () => {
   sfx.click();
   net.dbUpdate(`rooms/${room}/meta`, { rounds: Math.min(10, (meta.rounds || 4) + 1) });
 });
-$("btnMaxMinus").addEventListener("click", () => {
-  if (!isHost || !meta) return;
+// 방 만들기 옵션들
+$("btnCMaxMinus").addEventListener("click", () => {
   sfx.click();
-  // 현재 인원보다 낮게는 못 줄임
-  const floor = Math.max(MAX_PLAYERS_MIN, Object.keys(playersCache).length);
-  net.dbUpdate(`rooms/${room}/meta`, { maxPlayers: Math.max(floor, (meta.maxPlayers || MAX_PLAYERS) - 1) });
+  createMax = Math.max(MAX_PLAYERS_MIN, createMax - 1);
+  localStorage.setItem("sm_maxp", createMax);
+  renderCreateOpts();
 });
-$("btnMaxPlus").addEventListener("click", () => {
-  if (!isHost || !meta) return;
+$("btnCMaxPlus").addEventListener("click", () => {
   sfx.click();
-  net.dbUpdate(`rooms/${room}/meta`, { maxPlayers: Math.min(MAX_PLAYERS_MAX, (meta.maxPlayers || MAX_PLAYERS) + 1) });
+  createMax = Math.min(MAX_PLAYERS_MAX, createMax + 1);
+  localStorage.setItem("sm_maxp", createMax);
+  renderCreateOpts();
+});
+$("btnOptChat").addEventListener("click", () => {
+  sfx.click();
+  createChat = !createChat;
+  localStorage.setItem("sm_chat", createChat ? "1" : "0");
+  renderCreateOpts();
+});
+$("btnOptEmote").addEventListener("click", () => {
+  sfx.click();
+  createEmote = !createEmote;
+  localStorage.setItem("sm_emote", createEmote ? "1" : "0");
+  renderCreateOpts();
 });
 
 // ── QR 초대 ──────────────────────────────────

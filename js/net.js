@@ -7,7 +7,7 @@ import {
   getDatabase, ref, get, set, update, remove, onValue, onDisconnect,
   runTransaction, serverTimestamp, query, orderByChild, endAt, limitToFirst
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js";
-import { firebaseConfig, MAX_PLAYERS, ROOM_TTL_MS, COLORS } from "./config.js";
+import { firebaseConfig, MAX_PLAYERS, MAX_PLAYERS_MIN, MAX_PLAYERS_MAX, ROOM_TTL_MS, COLORS } from "./config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -77,7 +77,7 @@ async function cleanupOldRooms() {
   } catch { /* 인덱스/권한 문제 시 조용히 무시 */ }
 }
 
-export async function createRoom(nick) {
+export async function createRoom(nick, opts = {}) {
   cleanupOldRooms();
   let code = null;
   for (let i = 0; i < 6; i++) {
@@ -85,13 +85,16 @@ export async function createRoom(nick) {
     if (!(await dbGet(`rooms/${c}/meta`))) { code = c; break; }
   }
   if (!code) throw new Error("방 코드를 만들지 못했어. 다시 시도해줘!");
+  const maxPlayers = Math.max(MAX_PLAYERS_MIN, Math.min(MAX_PLAYERS_MAX, opts.maxPlayers || MAX_PLAYERS));
   await dbSet(`rooms/${code}`, {
     meta: {
       createdAt: serverTimestamp(),
       hostUid: _uid,
       status: "lobby",
       rounds: 4,
-      maxPlayers: MAX_PLAYERS,
+      maxPlayers,
+      allowChat: opts.allowChat !== false,
+      allowEmote: opts.allowEmote !== false,
       curRound: 0,
       phase: null
     },

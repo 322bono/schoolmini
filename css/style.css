@@ -119,6 +119,13 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   85% { transform: translate(2px, -2px) rotate(0.1deg); }
 }
 
+/* ── 방 만들기 옵션 ───────────────────────── */
+.create-opts { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.3rem; }
+.opt-row { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.opt-lbl { font-size: 1.1rem; font-weight: 700; color: var(--ink-soft); }
+.opt-toggle { min-width: 4.2em; background: #dff3d8; }
+.opt-toggle.off { background: #ffe2da; color: var(--red); }
+
 /* ── QR 초대 모달 ─────────────────────────── */
 .qr-modal {
   position: fixed; inset: 0; z-index: 80;

@@ -77,6 +77,24 @@
         <p class="hint" id="entryHint">친구들에게 보여줄 닉네임을 정해줘!</p>
         <input id="inpNick" class="sketch-input" maxlength="8" placeholder="닉네임 (8자까지)" autocomplete="off" />
         <input id="inpCode" class="sketch-input code" maxlength="4" placeholder="방 코드" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" style="display:none" />
+        <div id="createOpts" class="create-opts" style="display:none">
+          <div class="opt-row">
+            <span class="opt-lbl">최대 인원</span>
+            <div class="stepper sketch alt2" style="padding:.12rem .3rem">
+              <button id="btnCMaxMinus" class="btn btn-sm">−</button>
+              <span class="val" id="cMaxVal">20</span>
+              <button id="btnCMaxPlus" class="btn btn-sm">＋</button>
+            </div>
+          </div>
+          <div class="opt-row">
+            <span class="opt-lbl">💬 채팅</span>
+            <button id="btnOptChat" class="btn btn-sm opt-toggle">허용</button>
+          </div>
+          <div class="opt-row">
+            <span class="opt-lbl">😆 감정표현</span>
+            <button id="btnOptEmote" class="btn btn-sm opt-toggle">허용</button>
+          </div>
+        </div>
         <div class="panel-row">
           <button id="btnEntryBack" class="btn">← 뒤로</button>
           <button id="btnEntryGo" class="btn btn-red">만들기!</button>
@@ -116,12 +134,6 @@
               <button id="btnRoundMinus" class="btn btn-sm">−</button>
               <span class="val" id="roundsVal">4</span>
               <button id="btnRoundPlus" class="btn btn-sm">＋</button>
-            </div>
-            <div class="stepper-lbl">최대 인원</div>
-            <div class="stepper sketch alt2" style="padding:.25rem .4rem">
-              <button id="btnMaxMinus" class="btn btn-sm">−</button>
-              <span class="val" id="maxVal">20</span>
-              <button id="btnMaxPlus" class="btn btn-sm">＋</button>
             </div>
             <button id="btnStart" class="btn btn-lg btn-red boil">START!</button>
           </div>
