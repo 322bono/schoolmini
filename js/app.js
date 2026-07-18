@@ -936,7 +936,7 @@ const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
-  voice: "성대모사"
+  voice: "성대모사", omr: "찍기"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1340,6 +1340,15 @@ function botDrive() {
         const key = "p" + state.round;
         if ((!inp || inp[key] === undefined) && Math.random() < 0.45) {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { [key]: Math.floor(Math.random() * state.tiles) });
+        }
+      }
+    } else if (g === "omr") {
+      if (state && state.sub === "mark" && state.startAt && t > state.startAt) {
+        const v = inp || {};
+        let qi = 0;
+        while (qi < 10 && typeof v["a" + qi] === "number") qi++;
+        if (qi < 10 && Math.random() < 0.5) {
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { ["a" + qi]: Math.floor(Math.random() * 5) });
         }
       }
     } else if (g === "mugunghwa") {

@@ -2997,6 +2997,266 @@ const voice = {
 };
 
 // ═════════════════════════════════════════════
+// 16. 찍기! (OMR)
+// ═════════════════════════════════════════════
+const OMR_Q = 10;            // 문항 수
+const OMR_CHOICES = 5;       // 보기 수 (①~⑤)
+const OMR_LEAD = 3000;       // 카운트다운
+const OMR_MARK = 25000;      // 찍기 제한시간
+const OMR_GAP = 1400;        // "시험 끝!" 간지
+const OMR_INTRO = 1600;      // "채점 시작!" 연출
+const OMR_STEP = 1750;       // 문제당 정답 공개 간격
+const OMR_OUTRO = 3200;      // 총점 확인 시간
+const OMR_CIRC = ["①", "②", "③", "④", "⑤"];
+
+const omr = {
+  id: "omr",
+  name: "찍기!",
+  tag: "운빨 하나로 승부한다!",
+
+  stampOnTimeout: false, // 시간 종료가 정상 흐름인 게임
+  duration: () => OMR_LEAD + OMR_MARK + OMR_GAP + OMR_INTRO + OMR_Q * OMR_STEP + OMR_OUTRO + 2300,
+  hostSetup(ctx) {
+    const answers = [];
+    for (let i = 0; i < OMR_Q; i++) answers.push(Math.floor(Math.random() * OMR_CHOICES));
+    return { answers, sub: "mark", startAt: ctx.playStart + OMR_LEAD };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, lastSub: "", my: {}, rowEls: [], bubEls: [],
+      revealed: {}, sc: 0, finalShown: false, rowH: 0, examOverShown: false, gradeIntroShown: false
+    };
+    stage.innerHTML = `
+      <div class="omr-wrap">
+        <div class="omr-top">
+          <span class="sketch hud-chip" id="omrChip">찍은 문제: <b id="omrDone">0</b>/${OMR_Q}</span>
+          <span class="wa-count" id="omrCount"></span>
+        </div>
+        <div class="omr-sheet" id="omrSheet">
+          <div class="omr-head"><span>컴퓨터용 답안지</span><span>과목: 운빨</span></div>
+          <div class="omr-view"><div class="omr-rows" id="omrRows"></div></div>
+        </div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">✏️ 답은 아무도 몰라! 느낌 가는 대로 찍어! (문제당 10점)</div>`;
+    c.chipEl = stage.querySelector("#omrChip");
+    c.doneEl = stage.querySelector("#omrDone");
+    c.countEl = stage.querySelector("#omrCount");
+    c.sheet = stage.querySelector("#omrSheet");
+    c.rows = stage.querySelector("#omrRows");
+
+    for (let qi = 0; qi < OMR_Q; qi++) {
+      const row = document.createElement("div");
+      row.className = "omr-row";
+      const qn = document.createElement("span");
+      qn.className = "omr-qn";
+      qn.textContent = qi + 1;
+      row.appendChild(qn);
+      const bubs = document.createElement("div");
+      bubs.className = "omr-bubs";
+      c.bubEls[qi] = [];
+      for (let ci = 0; ci < OMR_CHOICES; ci++) {
+        const b = document.createElement("button");
+        b.className = "omr-bub";
+        b.textContent = OMR_CIRC[ci];
+        b.addEventListener("click", () => this._mark(ctx, qi, ci));
+        bubs.appendChild(b);
+        c.bubEls[qi].push(b);
+      }
+      row.appendChild(bubs);
+      const res = document.createElement("span");
+      res.className = "omr-res";
+      row.appendChild(res);
+      row._res = res;
+      c.rows.appendChild(row);
+      c.rowEls.push(row);
+    }
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _mark(ctx, qi, ci) {
+    const c = this._c;
+    const state = ctx.state();
+    if (!c || !state || state.sub !== "mark" || ctx.now() < state.startAt) return;
+    if (c.my[qi] === ci) return;
+    c.my[qi] = ci;
+    this._fillBub(qi, ci);
+    ctx.writeInput({ ["a" + qi]: ci });
+    sfx.click();
+    this._syncDone();
+    this._scrollTo(qi);
+  },
+
+  _fillBub(qi, ci) {
+    const c = this._c;
+    if (!c) return;
+    c.bubEls[qi].forEach((b, i) => b.classList.toggle("omr-fill", i === ci));
+  },
+
+  _syncDone() {
+    const c = this._c;
+    if (!c) return;
+    const n = Object.keys(c.my).length;
+    if (c.doneEl.textContent !== String(n)) c.doneEl.textContent = n;
+  },
+
+  /** qi번 문제가 잘 보이도록 시트를 아래로 스르륵 (표시는 5문항, 최대 5칸 내림) */
+  _scrollTo(qi) {
+    const c = this._c;
+    if (!c || !c.rows) return;
+    if (!c.rowH) c.rowH = c.rowEls[1] ? Math.max(30, c.rowEls[1].offsetTop - c.rowEls[0].offsetTop) : 50;
+    const off = Math.max(0, Math.min(OMR_Q - 5, qi - 3));
+    c.rows.style.transform = `translateY(${-off * c.rowH}px)`;
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || typeof state.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); }
+
+    if (state.sub === "mark") {
+      const remain = Math.max(0, Math.ceil((state.startAt + OMR_MARK - t) / 1000));
+      const txt = remain + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+    } else if (state.sub === "reveal" || state.sub === "done") {
+      this._tickReveal(ctx, state, t);
+    }
+  },
+
+  _tickReveal(ctx, state, t) {
+    const c = this._c;
+    // 시험 종료 연출 (1회)
+    if (!c.examOverShown) {
+      c.examOverShown = true;
+      c.sheet.classList.add("omr-locked");
+      c.countEl.textContent = "시험 끝!! ✋";
+      sfx.whistle();
+      this._scrollTo(0);
+    }
+    const e = t - (state.revealAt || t);
+    if (e < 0) return;
+    if (!c.gradeIntroShown) {
+      c.gradeIntroShown = true;
+      c.countEl.textContent = "채점 시작!! 🔴";
+      c.chipEl.innerHTML = `내 점수: <b id="omrScore">0</b>점`;
+      c.scoreEl = c.chipEl.querySelector("#omrScore");
+      sfx.bbam();
+    }
+    const answers = state.answers || [];
+    for (let k = 0; k < OMR_Q; k++) {
+      if (c.revealed[k] || e < OMR_INTRO + k * OMR_STEP) continue;
+      c.revealed[k] = true;
+      this._gradeRow(ctx, k, answers[k]);
+      this._scrollTo(k);
+    }
+    if (!c.finalShown && e >= OMR_INTRO + OMR_Q * OMR_STEP + 300) {
+      c.finalShown = true;
+      c.countEl.textContent = `채점 끝! 내 점수 ${c.sc}점!`;
+      (c.sc >= 70 ? sfx.tada : sfx.pop)();
+    }
+  },
+
+  /** k번 문제 채점: 정답 공개 + 내 마킹에 빨간 동그라미/빗금 */
+  _gradeRow(ctx, k, ans) {
+    const c = this._c;
+    if (typeof ans !== "number") return;
+    const row = c.rowEls[k];
+    const mine = c.my[k];
+    c.countEl.textContent = `${k + 1}번 정답은 ${OMR_CIRC[ans]}!!`;
+    c.bubEls[k][ans].classList.add("omr-ansmark"); // 정답 보기 표시
+    sfx.pop();
+    if (mine === ans) {
+      const o = document.createElement("span");
+      o.className = "omr-o";
+      c.bubEls[k][mine].appendChild(o);
+      row._res.textContent = "+10";
+      row._res.classList.add("omr-plus");
+      c.sc += 10;
+      if (c.scoreEl) c.scoreEl.textContent = c.sc;
+      sfx.correct();
+    } else {
+      const x = document.createElement("span");
+      x.className = "omr-x";
+      // 찍은 보기가 있으면 그 위에 빗금, 백지면 문항 번호 위에
+      (typeof mine === "number" ? c.bubEls[k][mine] : row.querySelector(".omr-qn")).appendChild(x);
+      row._res.textContent = "0";
+      row._res.classList.add("omr-zero");
+      sfx.wrong();
+    }
+  },
+
+  onState() {},
+  // 새로고침으로 다시 들어와도 내가 찍어둔 답을 화면에 복원
+  onInputs(inputs, ctx) {
+    const c = this._c;
+    if (!c || !inputs) return;
+    const mine = inputs[ctx.uid];
+    if (!mine) return;
+    for (let qi = 0; qi < OMR_Q; qi++) {
+      const v = mine["a" + qi];
+      if (typeof v === "number" && c.my[qi] === undefined) { c.my[qi] = v; this._fillBub(qi, v); }
+    }
+    this._syncDone();
+  },
+
+  // 호스트: 전원 완료(또는 시간 종료) → 정답 공개, 공개가 끝나면 done
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    if (state.sub === "mark") {
+      if (typeof state.startAt !== "number" || t < state.startAt) return;
+      const players = ctx.players();
+      const online = Object.keys(players).filter(pid => players[pid].online !== false);
+      const allDone = online.length > 0 && online.every(pid => {
+        const inp = inputs && inputs[pid];
+        if (!inp) return false;
+        for (let i = 0; i < OMR_Q; i++) if (typeof inp["a" + i] !== "number") return false;
+        return true;
+      });
+      if (allDone || t >= state.startAt + OMR_MARK) {
+        ctx.writeState({ sub: "reveal", revealAt: t + OMR_GAP });
+      }
+    } else if (state.sub === "reveal" && typeof state.revealAt === "number") {
+      if (t >= state.revealAt + OMR_INTRO + OMR_Q * OMR_STEP + OMR_OUTRO) ctx.writeState({ sub: "done" });
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) {
+    return state && state.sub === "done" ? 1400 : false;
+  },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const answers = (state && state.answers) || [];
+    const players = Object.keys(ctx.players());
+    const score = {};
+    for (const pid of players) {
+      let s = 0;
+      const inp = inputs[pid];
+      if (inp) for (let i = 0; i < answers.length; i++) if (inp["a" + i] === answers[i]) s += 10;
+      score[pid] = s;
+    }
+    const played = players
+      .filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "a" && typeof inputs[p][k] === "number"))
+      .sort((a, b) => score[b] - score[a]);
+    return tierOutcome(ctx, played, pid => score[pid] + "점", "백지 제출… 💤");
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -3175,5 +3435,24 @@ voice.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice };
+omr.demo = () => {
+  const d = dmStage("dm-omr");
+  const card = dmAt(dmProp("dm-om-card"), "38%", "6%");
+  for (let r = 0; r < 3; r++) {
+    const row = dmProp("dm-om-row");
+    row.appendChild(dmProp("dm-om-qn", String(r + 1)));
+    for (let i = 0; i < 5; i++) {
+      const b = dmProp("dm-om-bub" + (r === 0 && i === 2 ? " dm-om-b1" : r === 1 && i === 4 ? " dm-om-b2" : ""), OMR_CIRC[i]);
+      if (r === 0 && i === 2) b.appendChild(dmProp("dm-om-oring"));
+      row.appendChild(b);
+    }
+    card.appendChild(row);
+  }
+  d.appendChild(card);
+  d.appendChild(dmAt(dmProp("dm-om-tap", "👆"), "56%", "22%"));
+  d.appendChild(dmAt(dmProp("dm-om-hint", "느낌대로 찍어! 문제당 10점"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr };

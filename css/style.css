@@ -1098,6 +1098,43 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmSpHand { 0% { transform: translate(-50%, -6px); opacity: 1; } 100% { transform: translate(-50%, 34px); opacity: 0; } }
 .dm-sp-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
+/* 찍기: OMR에 마킹 → 빨간 동그라미 채점 */
+.dm-om-card {
+  width: 158px;
+  background: #fffdf6; border: 3px solid var(--ink); border-radius: 8px;
+  padding: 0.3rem 0.4rem;
+  display: flex; flex-direction: column; gap: 0.3rem;
+}
+.dm-om-card .demo-prop { position: static; transform: none; }
+.dm-om-row { display: flex; align-items: center; gap: 0.28rem; justify-content: center; }
+.dm-om-qn { font-size: 0.78rem; color: #c05840; width: 0.9em; }
+.dm-om-bub {
+  position: relative;
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid #d98d77; background: #fff;
+  color: #c9765e; font-size: 0.62rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.dm-om-b1 { animation: dmOmFill1 4s steps(1, end) infinite; }
+@keyframes dmOmFill1 { 0%, 20% { background: #fff; color: #c9765e; } 24%, 100% { background: var(--ink); border-color: var(--ink); color: transparent; } }
+.dm-om-b2 { animation: dmOmFill2 4s steps(1, end) infinite; }
+@keyframes dmOmFill2 { 0%, 56% { background: #fff; color: #c9765e; } 60%, 100% { background: var(--ink); border-color: var(--ink); color: transparent; } }
+.dm-om-tap { font-size: 1.5rem; animation: dmOmTap 4s infinite; }
+@keyframes dmOmTap {
+  0%, 14% { top: 22%; transform: translate(-50%, 6px); }
+  18%, 24% { top: 22%; transform: translate(-50%, -3px); }
+  40%, 50% { top: 45%; transform: translate(-50%, 6px); }
+  54%, 60% { top: 45%; transform: translate(-50%, -3px); }
+  76%, 100% { top: 45%; transform: translate(-50%, 6px); opacity: 0; }
+}
+.dm-om-card .dm-om-oring {
+  position: absolute; inset: -5px;
+  border: 3px solid rgba(224, 71, 47, 0.9); border-radius: 50%;
+  opacity: 0; animation: dmOmO 4s infinite;
+}
+@keyframes dmOmO { 0%, 74% { opacity: 0; transform: scale(1.9); } 80%, 96% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
+.dm-om-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
 /* 성대모사: 듣고 → 따라하고 → 채점 */
 .dm-vc-spk { font-size: 2rem; animation: vcPulse 0.9s ease-in-out infinite; }
 .dm-vc-note { font-size: 1.3rem; color: var(--blue); opacity: 0; animation: dmVcNote 1.8s linear infinite; }
@@ -1107,6 +1144,68 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .dm-vc-mic { font-size: 1.7rem; animation: dmVcMic 0.8s ease-in-out infinite; }
 @keyframes dmVcMic { 50% { transform: translateX(-50%) scale(1.15); } }
 .dm-vc-score { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* ── 찍기! (OMR) ──────────────────────────── */
+.omr-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.55rem; padding-top: 0.15rem; min-height: 0; }
+.omr-top { display: flex; gap: 0.9rem; align-items: center; min-height: 2.2em; }
+.omr-sheet {
+  width: min(370px, 94vw);
+  background: #fffdf6;
+  border: 3px solid var(--ink);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 4px 5px 0 rgba(51, 49, 46, 0.12);
+}
+.omr-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.28rem 0.75rem;
+  background: #fdeae2;
+  border-bottom: 2.5px solid #e08770;
+  color: #c05840; font-weight: 700; font-size: 0.92rem;
+}
+.omr-view { height: 250px; overflow: hidden; }
+.omr-rows { transition: transform 0.55s cubic-bezier(0.3, 1, 0.3, 1); }
+.omr-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  height: 50px; padding: 0 0.65rem;
+  border-bottom: 1.5px dashed #eec6ba;
+}
+.omr-qn { position: relative; width: 1.5em; text-align: right; font-weight: 700; color: #c05840; font-size: 1.05rem; }
+.omr-bubs { display: flex; flex: 1; justify-content: space-evenly; }
+.omr-bub {
+  position: relative;
+  width: 35px; height: 35px; border-radius: 50%;
+  border: 2px solid #d98d77; background: #fff;
+  color: #c9765e; font-weight: 700; font-size: 0.98rem;
+  font-family: inherit; line-height: 1; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+.omr-bub:active { transform: scale(0.85); }
+.omr-bub.omr-fill { background: var(--ink); border-color: var(--ink); color: transparent; } /* 컴퓨터용 사인펜 */
+.omr-sheet.omr-locked .omr-bub { pointer-events: none; }
+.omr-bub.omr-ansmark { border-color: var(--green); box-shadow: 0 0 0 2.5px var(--green); }
+.omr-res { min-width: 2.3em; text-align: center; font-weight: 700; font-size: 1.02rem; }
+.omr-res.omr-plus { color: var(--red); animation: omrPop 0.4s cubic-bezier(0.2, 1.8, 0.4, 1); }
+.omr-res.omr-zero { color: var(--ink-soft); }
+/* 선생님 채점: 정답은 빨간 동그라미, 오답은 빗금 */
+.omr-o {
+  position: absolute; inset: -7px;
+  border: 4px solid rgba(224, 71, 47, 0.85); border-radius: 50%;
+  pointer-events: none;
+  animation: omrPop 0.35s cubic-bezier(0.2, 1.8, 0.4, 1);
+}
+.omr-x {
+  position: absolute; left: 50%; top: 50%;
+  width: 46px; height: 4.5px;
+  background: rgba(224, 71, 47, 0.85); border-radius: 3px;
+  transform: translate(-50%, -50%) rotate(-38deg);
+  pointer-events: none;
+  animation: omrSlash 0.28s ease-out;
+}
+@keyframes omrPop { from { transform: scale(2.1); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes omrSlash { from { transform: translate(-50%, -50%) rotate(-38deg) scaleX(0); } }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {
