@@ -141,6 +141,21 @@ function openEntry(mode) {
   setTimeout(() => $("inpNick").focus(), 250);
 }
 
+// 입장하면서 마이크 권한을 미리 받아둠 — 성대모사가 걸렸을 때 권한창 없이 바로 진행되게.
+// 결과(허용/거부)는 플레이어 정보에 기록되어, 성대모사 주인공 뽑기에서 마이크 되는 사람만 후보가 된다.
+async function checkMicPermission() {
+  let ok = false;
+  try {
+    if (navigator.mediaDevices && window.MediaRecorder) {
+      const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+      s.getTracks().forEach(tr => tr.stop()); // 권한만 확보하고 즉시 끔
+      ok = true;
+    }
+  } catch { ok = false; }
+  resumeAudio();
+  if (room && UID) net.dbUpdate(`rooms/${room}/players/${UID}`, { micok: ok }).catch(() => {});
+}
+
 async function submitEntry() {
   const nick = $("inpNick").value.trim();
   if (!nick) { toast("닉네임을 입력해줘!", true); return; }
@@ -157,6 +172,7 @@ async function submitEntry() {
       await net.joinRoom(code, nick);
       enterRoom(code);
     }
+    checkMicPermission(); // 입장 직후 (터치 제스처 흐름 안에서) 마이크 권한 요청
   } catch (e) {
     toast(e.message || "문제가 생겼어… 다시 시도해줘!", true);
     btn.disabled = false;
@@ -170,7 +186,7 @@ function enterRoom(code) {
   $("btnEntryGo").disabled = false;
   lastPhaseKey = "";
   lastStatus = "";
-  finalShown = false;
+  finalShown = false; finalSig = "";
   endedRounds = new Set();
 
   unsubs.push(net.dbWatch(`rooms/${code}/meta`, v => { meta = v; onMeta(); }));
@@ -258,6 +274,8 @@ function onPlayers() {
   renderColors();
   renderLobbyMeta();
   handleEmotesAndChat();
+  // 최종 화면에서 늦게 도착한 점수 동기화 반영 (모두 같은 우승자를 보게)
+  if (meta && meta.status === "final") renderFinal();
 }
 
 function onGameData() {
@@ -852,19 +870,25 @@ const GAME_SHORT = {
   voice: "성대모사"
 };
 
-// 최종 리더보드
+// 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
+// 덜 끝난 클라이언트가 낡은 순위를 계속 보는 "사람마다 우승자 다름" 버그 방지).
+// 팡파레·음악·컨페티만 1회.
+let finalSig = "";
 function renderFinal() {
-  if (finalShown) {
-    $("btnAgain").style.display = isHost ? "" : "none";
-    return;
-  }
-  finalShown = true;
-  hideOverlays();
-  unmountGame();
   const ids = Object.keys(playersCache).sort((a, b) =>
     (playersCache[b].score || 0) - (playersCache[a].score || 0) ||
     (playersCache[a].joined || 0) - (playersCache[b].joined || 0)
   );
+  const sig = ids.map(pid => pid + ":" + (playersCache[pid].score || 0)).join(",");
+  if (finalShown && sig === finalSig) {
+    $("btnAgain").style.display = isHost ? "" : "none";
+    return;
+  }
+  finalSig = sig;
+  const firstTime = !finalShown;
+  finalShown = true;
+  hideOverlays();
+  unmountGame();
 
   // 우승자 배너 + 춤
   const champ = ids[0];
@@ -922,6 +946,7 @@ function renderFinal() {
     list.appendChild(row);
   });
   $("btnAgain").style.display = isHost ? "" : "none";
+  if (!firstTime) return; // 데이터 갱신에 의한 재렌더는 연출 없이 내용만 교체
   sfx.tada();
   setTimeout(() => playPodiumMusic(), 700);
   // 별 낙서 컨페티
@@ -1399,7 +1424,7 @@ $("btnFinalLeave").addEventListener("click", () => { sfx.click(); leaveToHome();
 $("btnAgain").addEventListener("click", async () => {
   if (!isHost) return;
   sfx.click();
-  finalShown = false;
+  finalShown = false; finalSig = "";
   const updates = { "meta/status": "lobby", "meta/phase": null, "meta/curRound": 0, game: null, history: null, "meta/timeout": null, "meta/spicy": null };
   for (const pid of Object.keys(playersCache)) updates[`players/${pid}/score`] = 0;
   await net.dbUpdate(`rooms/${room}`, updates);

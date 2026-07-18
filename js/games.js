@@ -130,7 +130,7 @@ function gameLoop(fn) {
       setTimeout(() => {
         if (stopped) return;
         const t = performance.now();
-        fn(t, Math.min(0.05, (t - prev) / 1000));
+        try { fn(t, Math.min(0.05, (t - prev) / 1000)); } catch (e) { console.error("gameLoop", e); }
         prev = t;
         arm();
       }, 200);
@@ -139,7 +139,8 @@ function gameLoop(fn) {
     raf = requestAnimationFrame(t => {
       const dt = Math.min(0.05, (t - prev) / 1000);
       prev = t;
-      fn(t, dt);
+      // 한 프레임의 예외가 루프 전체를 죽이면 게임이 통째로 멈춘다 — 반드시 격리
+      try { fn(t, dt); } catch (e) { console.error("gameLoop", e); }
       arm();
     });
   };
@@ -823,12 +824,16 @@ const choseki = {
       c.pressed = true;
       btn.disabled = true;
       const e = Math.round(ctx.now() - state.startAt);
+      // 프론트에서 즉시 내 기록 확정 표시 — 서버 왕복을 기다리지 않음
+      clearTimeout(c.fadeTimer);
+      c.clock.classList.remove("hidden-time", "cs-fading");
+      c.clock.textContent = (e / 1000).toFixed(2);
       ctx.writeInput({ e });
       const el = c.map[ctx.uid];
       if (el) { setMotion(el, "shout"); charSay(el, "지금이다!", 1800); }
       sfx.pop();
       btn.textContent = "제출 완료! 과연…?";
-      c.note.textContent = "결과는 잠시 후에! 🤫";
+      if (c.note) c.note.textContent = "내 기록 저장! 결과는 잠시 후에 🤫";
     });
 
     c.stopLoop = gameLoop(() => this._tick(ctx));
@@ -851,6 +856,7 @@ const choseki = {
       c.btn.disabled = c.pressed;
       gameStartFx();
     }
+    if (c.pressed) return; // 눌렀으면 내 기록을 고정 표시 — 시계 갱신 중단
     const e = t - state.startAt;
     if (e < 1200) {
       clearTimeout(c.fadeTimer);
@@ -913,8 +919,17 @@ const choseki = {
 const WHACK_START = 3500;
 const WHACK_DUR = 30000;
 
-/** 시드로 두더지 스케줄 생성 — 모든 플레이어가 같은 두더지를 본다 (봇 구동용으로 export) */
+/** 시드로 두더지 스케줄 생성 — 모든 플레이어가 같은 두더지를 본다 (봇 구동용으로 export)
+ *  매 프레임 점수 계산에서 재사용되므로 시드별로 캐시 (방장 렉 방지) */
+const molesCache = {};
 export function genMoles(seed) {
+  if (molesCache[seed]) return molesCache[seed];
+  const events = genMolesRaw(seed);
+  molesCache[seed] = events;
+  return events;
+}
+
+function genMolesRaw(seed) {
   const rng = mulberry32(seed);
   const events = [];
   const holeBusy = [0, 0, 0, 0, 0, 0];
@@ -2585,7 +2600,9 @@ const voice = {
   hostSetup(ctx) {
     const players = ctx.players();
     const humans = Object.keys(players).filter(id => !players[id].bot);
-    const pool = humans.length ? humans : Object.keys(players);
+    // 입장할 때 마이크 권한을 허용한 사람 우선 — 성대모사는 무조건 되는 사람이 걸려야 함
+    const micReady = humans.filter(id => players[id].micok);
+    const pool = micReady.length ? micReady : (humans.length ? humans : Object.keys(players));
     return {
       perf: pool[Math.floor(Math.random() * pool.length)],
       clip: Math.floor(Math.random() * VOICE_CLIPS.length),
@@ -2611,13 +2628,18 @@ const voice = {
     c.statusEl = stage.querySelector("#vcStatus");
     c.main = stage.querySelector("#vcMain");
     c.board = stage.querySelector("#vcBoard");
-    c.note = stage.querySelector("#vcNote");
+    c.note = dock.querySelector("#vcNote"); // 주의: 안내 문구는 dock에 있다 (stage 아님)
     c.stopLoop = gameLoop(() => this._tick(ctx));
   },
 
   _setStatus(text) {
     const c = this._c;
     if (c && c.statusEl && c.statusEl.textContent !== text) c.statusEl.textContent = text;
+  },
+
+  _setNote(text) {
+    const c = this._c;
+    if (c && c.note && c.note.textContent !== text) c.note.textContent = text;
   },
 
   // 재생은 전부 Web Audio 버퍼 경로 — iOS에서도 제스처 없이 확실히 들린다
@@ -2794,7 +2816,7 @@ const voice = {
       case "prep": {
         // 마이크 권한 팝업이 듣기 단계를 덮치지 않게 — 준비가 끝나야 다음으로
         this._setStatus(iAmPerf ? "🎙 마이크 허용을 눌러줘!" : `🎙 ${perfNick}이(가) 마이크 준비 중…`);
-        c.note.textContent = iAmPerf ? "팝업에서 [허용]을 누르면 시작!" : "잠깐만 기다려줘!";
+        this._setNote(iAmPerf ? "팝업에서 [허용]을 누르면 시작!" : "잠깐만 기다려줘!");
         c.main.innerHTML = `<div class="vc-speaker">🎙</div>`;
         if (iAmPerf && !c.prepStarted) {
           c.prepStarted = true;
@@ -2806,7 +2828,7 @@ const voice = {
       case "listen2": {
         const nth = state.sub === "listen1" ? 1 : 2;
         this._setStatus(`잘 들어봐! (${nth}/2)`);
-        c.note.textContent = iAmPerf ? "🎧 이걸 그대로 따라하는 거야!" : `🎧 ${perfNick}이(가) 따라할 소리!`;
+        this._setNote(iAmPerf ? "🎧 이걸 그대로 따라하는 거야!" : `🎧 ${perfNick}이(가) 따라할 소리!`);
         c.main.innerHTML = `<div class="vc-speaker">🔊</div>`;
         // 600ms 리드인 후 재생 — 화면 전환하자마자 지나가버리지 않게
         const sub = c.lastSub;
@@ -2819,17 +2841,17 @@ const voice = {
       case "count":
         this._setStatus("3…");
         c.cdLast = -1;
-        c.note.textContent = iAmPerf ? "🎙 곧 녹음 시작! 목 가다듬어!" : "🤫 조용! 곧 시작해!";
+        this._setNote(iAmPerf ? "🎙 곧 녹음 시작! 목 가다듬어!" : "🤫 조용! 곧 시작해!");
         c.main.innerHTML = `<div class="vc-speaker">🎙</div>`;
         break;
       case "record":
         if (iAmPerf) {
           this._setStatus("지금 따라해!! 🎙");
-          c.note.textContent = "🔴 녹음 중!! 최대한 똑같이!";
+          this._setNote("🔴 녹음 중!! 최대한 똑같이!");
           this._startRec(ctx);
         } else {
           this._setStatus(`${perfNick}이(가) 성대모사 중…!`);
-          c.note.textContent = "🤫 절대 조용!! 웃음 참기!!";
+          this._setNote("🤫 절대 조용!! 웃음 참기!!");
         }
         c.main.innerHTML = `
           <div class="vc-mic${iAmPerf ? " vc-recing" : ""}">🎙</div>
@@ -2837,25 +2859,25 @@ const voice = {
         break;
       case "waitrec":
         this._setStatus("녹음 정리 중… 📼");
-        c.note.textContent = "잠시만!";
+        this._setNote("잠시만!");
         c.main.innerHTML = `<div class="vc-speaker">📼</div>`;
         break;
       case "playback":
         this._setStatus("들어보자!! 🔊");
-        c.note.textContent = `🎧 ${perfNick}의 성대모사!`;
+        this._setNote(`🎧 ${perfNick}의 성대모사!`);
         c.main.innerHTML = `<div class="vc-speaker">🔊</div>`;
         this._playRec(ctx);
         break;
       case "overlay":
         this._setStatus("동시 재생!! 얼마나 비슷할까?");
-        c.note.textContent = "🎧 원본 + 성대모사 동시에!";
+        this._setNote("🎧 원본 + 성대모사 동시에!");
         c.main.innerHTML = `<div class="vc-speaker">🔊🔊</div>`;
         this._playClip(ctx, 0);
         this._playRec(ctx);
         break;
       case "score":
         c.scoreShown = {};
-        c.note.textContent = "과연 결과는…?!";
+        this._setNote("과연 결과는…?!");
         this._setStatus("채점 중…");
         c.main.innerHTML = "";
         c.board.style.display = "";
