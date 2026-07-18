@@ -94,6 +94,53 @@ function makeCtx(over = {}) {
   }, over);
 }
 
+// ── P2P 구조 보강: 화면 꺼짐 방지 / 방장 자동 승계 / 재연결 복구 ──
+
+// 게임 중엔 화면이 꺼지지 않게 (특히 방장 기기가 서버 역할이라 꺼지면 게임 전체가 멈춤)
+let wakeLock = null;
+async function syncWakeLock() {
+  const want = !!(room && meta && meta.status === "playing");
+  try {
+    if (want && !wakeLock && navigator.wakeLock && document.visibilityState === "visible") {
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release", () => { wakeLock = null; });
+    } else if (!want && wakeLock) {
+      const wl = wakeLock;
+      wakeLock = null;
+      await wl.release();
+    }
+  } catch { wakeLock = null; }
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden) syncWakeLock(); });
+
+// 방장 연결이 끊기면(또는 나가면) 가장 먼저 들어온 온라인 플레이어가 자동으로 방장 승계.
+// 단일 장애점 제거 — 방장이 사라져도 게임이 이어진다.
+let hostDownSince = 0;
+setInterval(() => {
+  if (!room || !meta || !UID || !playersCache[UID]) return;
+  const host = playersCache[meta.hostUid];
+  const hostAlive = host && host.online !== false && !host.bot;
+  if (hostAlive) { hostDownSince = 0; return; }
+  if (!hostDownSince) { hostDownSince = Date.now(); return; }
+  if (Date.now() - hostDownSince < 4000) return; // 잠깐 끊긴 건 기다려줌
+  // 승계 1순위(온라인 인간 중 최선입)가 나일 때만 시도
+  const cands = Object.keys(playersCache)
+    .filter(id => playersCache[id] && playersCache[id].online !== false && !playersCache[id].bot)
+    .sort((a, b) => (playersCache[a].joined || 0) - (playersCache[b].joined || 0));
+  if (!cands.length || cands[0] !== UID) return;
+  const oldHost = meta.hostUid;
+  hostDownSince = 0;
+  net.dbTxn(`rooms/${room}/meta/hostUid`, cur => (cur === oldHost ? UID : undefined)).catch(() => {});
+}, 1500);
+
+// 와이파이가 잠깐 끊겼다 돌아오면 online 표시와 접속 감지를 복구
+// (이게 없으면 한 번 끊긴 사람은 영원히 "연결 끊김"으로 보이고 방장 승계도 오작동)
+net.dbWatch(".info/connected", connected => {
+  if (!connected || !room || !UID) return;
+  net.dbUpdate(`rooms/${room}/players/${UID}`, { online: true }).catch(() => {});
+  net.presence(`rooms/${room}/players/${UID}`); // onDisconnect는 발동 후 사라지므로 재장전
+});
+
 // ── 홈 화면 마스코트 ──────────────────────────
 const MASCOT_LINES = ["안녕!", "같이 놀자~", "한 판 고?", "심심해…", "나 귀엽지?", "쉬는시간이다!!"];
 function setupMascot() {
@@ -234,6 +281,7 @@ async function leaveToHome() {
 }
 
 // ── 메타 변화 → 화면 라우팅 ───────────────────
+let lastHostUid = null;
 function onMeta() {
   if (!room) return;
   if (!meta) {
@@ -244,6 +292,15 @@ function onMeta() {
     return;
   }
   isHost = meta.hostUid === UID;
+  // 방장 승계 알림
+  if (lastHostUid && meta.hostUid !== lastHostUid) {
+    const np = playersCache[meta.hostUid];
+    toast(isHost ? "방장 연결이 끊겨서 내가 새 방장이 됐어! 👑" : `방장이 ${np ? np.nick : "?"}(으)로 바뀌었어! 👑`);
+    renderPlayerList();
+    renderLobbyChars();
+  }
+  lastHostUid = meta.hostUid;
+  syncWakeLock();
   if (lastStatus !== meta.status) lastPhaseKey = ""; // 매치 재시작 시 페이즈 키 초기화
 
   if (meta.status === "lobby") {
