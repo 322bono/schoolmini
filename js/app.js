@@ -5,6 +5,7 @@ import { qrSvg } from "./qr.js";
 import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails, resumeAudio } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
+import { showSideRails, showInterstitial } from "./ads.js";
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -64,6 +65,8 @@ function showScreen(id, silent = false) {
   // 감정표현 버튼은 로비(대기실)에서만
   $("btnEmote").style.display = id === "scr-lobby" ? "" : "none";
   $("emotePicker").hidden = true;
+  // PC 홈 화면에서만 양쪽 세로 광고
+  showSideRails(id === "scr-home");
   if (!silent) sfx.swoosh();
 }
 
@@ -226,6 +229,7 @@ async function submitEntry() {
       enterRoom(code);
     }
     checkMicPermission(); // 입장 직후 (터치 제스처 흐름 안에서) 마이크 권한 요청
+    showInterstitial();   // 방으로 넘어가는 전환 순간 광고 1개 (모바일/PC 공통)
   } catch (e) {
     toast(e.message || "문제가 생겼어… 다시 시도해줘!", true);
     btn.disabled = false;
@@ -1545,6 +1549,7 @@ $("btnAgain").addEventListener("click", async () => {
 
 setupMascot();
 setBgm(true); // 첫 화면(홈)부터 BGM — 실제 재생은 첫 터치 후 시작됨
+showSideRails(curScreen === "scr-home"); // 초기 홈은 이미 활성 상태라 showScreen이 안 불림 → 여기서 한 번
 
 // 부팅: 익명 로그인 → QR 링크(?join=코드)면 코드 채워진 참가 화면 → 아니면 이전 방 자동 복귀
 (async () => {

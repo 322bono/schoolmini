@@ -1335,6 +1335,54 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .brk-table tbody tr { animation: rowIn 0.45s cubic-bezier(0.2, 1.4, 0.4, 1) both; }
 @keyframes rowIn { from { opacity: 0; transform: translateX(-14px); } }
 
+/* ── 광고 (애드센스) ──────────────────────────── */
+/* PC 홈 양쪽 세로 광고 — 좁은 화면에선 절대 안 보임 */
+.ad-rail {
+  position: fixed; top: 50%; transform: translateY(-50%);
+  width: 160px; height: 600px; z-index: 40;
+  display: flex; align-items: center; justify-content: center;
+}
+.ad-rail-left { left: 16px; }
+.ad-rail-right { right: 16px; }
+.ad-rail[hidden] { display: none; }
+@media (max-width: 1099px) { .ad-rail { display: none !important; } }
+.ad-preview-box {
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--ink-soft); border-radius: var(--r2);
+  background: rgba(51, 49, 46, 0.05);
+  color: var(--ink-soft); font-size: 0.95rem; text-align: center;
+}
+
+/* 방 입장 전환 광고 (인터스티셜) */
+.ad-interstitial {
+  position: fixed; inset: 0; z-index: 220;
+  background: rgba(30, 28, 26, 0.62);
+  display: flex; align-items: center; justify-content: center;
+  padding: 1rem; padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+}
+.ad-interstitial[hidden] { display: none; }
+.ad-inter-card {
+  background: var(--paper); border: 3px solid var(--ink); border-radius: var(--r1);
+  box-shadow: 5px 6px 0 rgba(51, 49, 46, 0.18);
+  padding: 0.7rem 0.8rem 0.9rem;
+  width: 100%; max-width: 360px;
+  display: flex; flex-direction: column; gap: 0.6rem;
+}
+.ad-inter-head { display: flex; align-items: center; justify-content: space-between; }
+.ad-label {
+  font-size: 0.72rem; color: var(--ink-soft);
+  border: 1.5px solid var(--ink-soft); border-radius: 5px; padding: 0.05em 0.5em;
+}
+.ad-inter-close {
+  border: none; background: none; font-size: 1.2rem; line-height: 1;
+  color: var(--ink-soft); cursor: pointer; padding: 0.1em 0.3em;
+}
+.ad-inter-slot {
+  min-height: 250px; display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.ad-inter-go { width: 100%; font-size: 1.3rem; padding: 0.4em; }
+
 /* ── 반응형 ───────────────────────────────── */
 @media (max-width: 620px) {
   .lobby-bottom { flex-direction: column; }

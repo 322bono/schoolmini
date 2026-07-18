@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@300;400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
+  <!-- Google AdSense -->
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9136879719243756" crossorigin="anonymous"></script>
 </head>
 <body>
   <!-- 연필 보일링용 SVG 필터 (씨앗값만 다른 3장을 번갈아 적용) -->
@@ -209,6 +211,22 @@
         <button id="btnFinalLeave" class="btn">홈으로</button>
       </div>
     </section>
+  </div>
+
+  <!-- ── 광고 (PC 홈 양쪽 세로 광고) ── -->
+  <aside class="ad-rail ad-rail-left" id="adRailLeft" hidden></aside>
+  <aside class="ad-rail ad-rail-right" id="adRailRight" hidden></aside>
+
+  <!-- ── 광고 (방 입장 전환 시 한 번) ── -->
+  <div class="ad-interstitial" id="adInterstitial" hidden>
+    <div class="ad-inter-card">
+      <div class="ad-inter-head">
+        <span class="ad-label">광고</span>
+        <button class="ad-inter-close" id="adInterClose" aria-label="닫기">✕</button>
+      </div>
+      <div class="ad-inter-slot" id="adInterSlot"></div>
+      <button class="btn btn-blue ad-inter-go" id="adInterGo">방으로 입장하기 →</button>
+    </div>
   </div>
 
   <script type="module" src="js/app.js"></script>
