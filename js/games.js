@@ -242,7 +242,9 @@ const mugunghwa = {
     const players = ctx.players();
     const ids = Object.keys(players);
     const humans = ids.filter(id => !players[id].bot);
-    const pool = humans.length ? humans : ids;
+    // 오프라인인 사람이 술래로 뽑히면 사이클이 영영 안 돌아간다 — 접속 중인 사람 우선
+    const online = humans.filter(id => players[id].online !== false);
+    const pool = online.length ? online : (humans.length ? humans : ids);
     const tagger = pool[Math.floor(Math.random() * pool.length)];
     return { tagger, sub: "roulette" };
   },
@@ -1260,9 +1262,9 @@ const typing = {
   onInputs() {},
   onGame() {},
   hostEarlyEnd(ctx, inputs, state) {
-    if (!state) return false;
-    const words = this._c && this._c.words;
-    if (!words) return false;
+    // 방장 로컬 DOM 상태(_c) 대신 시드에서 직접 계산 — 승계 방장도 동일하게 판정
+    if (!state || state.seed === undefined || typeof state.startAt !== "number") return false;
+    const words = genWords(state.seed).words;
     const last = words[words.length - 1];
     if (ctx.now() - state.startAt > last.at + last.ttl + 1200) return 1500;
     return false;
@@ -2301,7 +2303,12 @@ const boss = {
       c.jar.textContent = "💥";
       c.jar.classList.add("boss-dead");
       c.kill.style.display = "";
-      c.kill.innerHTML = `막타!!! <b>${p ? p.nick : "?"}</b> +3`;
+      // 닉네임은 사용자 입력 — innerHTML 금지
+      c.kill.textContent = "";
+      c.kill.append("막타!!! ");
+      const kb = document.createElement("b");
+      kb.textContent = p ? p.nick : "?";
+      c.kill.append(kb, " +3");
       sfx.boom();
       if (state.killer === ctx.uid) { sfx.win(); vibrate(300); }
     }
@@ -2600,9 +2607,12 @@ const voice = {
   hostSetup(ctx) {
     const players = ctx.players();
     const humans = Object.keys(players).filter(id => !players[id].bot);
+    // 오프라인인 사람이 주인공이면 라운드 전체가 죽은 시간 — 접속 중인 사람 우선
+    const online = humans.filter(id => players[id].online !== false);
+    const base = online.length ? online : humans;
     // 입장할 때 마이크 권한을 허용한 사람 우선 — 성대모사는 무조건 되는 사람이 걸려야 함
-    const micReady = humans.filter(id => players[id].micok);
-    const pool = micReady.length ? micReady : (humans.length ? humans : Object.keys(players));
+    const micReady = base.filter(id => players[id].micok);
+    const pool = micReady.length ? micReady : (base.length ? base : Object.keys(players));
     return {
       perf: pool[Math.floor(Math.random() * pool.length)],
       clip: Math.floor(Math.random() * VOICE_CLIPS.length),
@@ -2925,6 +2935,11 @@ const voice = {
   hostTick(ctx, state, inputs) {
     if (!state || !state.sub) return;
     const t = ctx.now();
+    // 주인공이 방을 나가버리면(목록에서 사라짐) 남은 단계는 무의미 — 바로 채점으로
+    if (state.sub !== "score" && state.perf && !ctx.players()[state.perf]) {
+      ctx.writeState({ sub: "score", subAt: t });
+      return;
+    }
     const lens = voiceSubLens(state.clip);
     const inp = inputs && inputs[state.perf];
     // 주인공 마이크 준비 완료 → 바로 듣기 시작 (팝업이 듣기를 덮치지 않게)

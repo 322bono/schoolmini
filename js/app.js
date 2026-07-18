@@ -74,6 +74,11 @@ function colorOf(pid) {
 
 function phaseKeyOf(m) { return m ? `${m.status}:${m.curRound}:${m.phase}` : ""; }
 
+// 정상 플레이어 판별 — 나간 직후 방장의 점수 기록이 레이스로 되살린 "유령"({score}만 있는
+// 닉네임 없는 항목)을 화면/순위에서 걸러낸다. 방장은 hostJanitor가 DB에서도 지워준다.
+function isRealPlayer(p) { return p && p.nick !== undefined; }
+function realIds() { return Object.keys(playersCache).filter(pid => isRealPlayer(playersCache[pid])); }
+
 function makeCtx(over = {}) {
   return Object.assign({
     code: room,
@@ -204,7 +209,7 @@ async function checkMicPermission() {
 }
 
 async function submitEntry() {
-  const nick = $("inpNick").value.trim();
+  const nick = $("inpNick").value.trim().slice(0, 8); // maxlength와 별개로 한 번 더 강제
   if (!nick) { toast("닉네임을 입력해줘!", true); return; }
   const btn = $("btnEntryGo");
   btn.disabled = true;
@@ -373,7 +378,7 @@ function renderPlayerList() {
   const list = $("playerList");
   if (!list) return;
   list.innerHTML = "";
-  const ids = Object.keys(playersCache).sort((a, b) => (playersCache[a].joined || 0) - (playersCache[b].joined || 0));
+  const ids = realIds().sort((a, b) => (playersCache[a].joined || 0) - (playersCache[b].joined || 0));
   for (const pid of ids) {
     const p = playersCache[pid];
     const row = document.createElement("div");
@@ -418,7 +423,7 @@ function renderColors() {
 function renderLobbyChars() {
   if (!meta || meta.status !== "lobby") return;
   const pg = $("playground");
-  const ids = new Set(Object.keys(playersCache));
+  const ids = new Set(realIds());
   // 나간 사람 제거
   for (const pid of Object.keys(wander)) {
     if (!ids.has(pid)) { wander[pid].el.remove(); delete wander[pid]; }
@@ -623,9 +628,12 @@ function sendChat() {
   net.dbUpdate(`rooms/${room}/players/${UID}/say`, { m: msg, t: net.now() });
 }
 
-// 방장: 게임 시작
+// 방장: 게임 시작 (더블탭으로 두 번 시작되지 않게 로비 상태 + 래치 이중 확인)
+let startingMatch = false;
 async function hostStartGame() {
-  if (!isHost || !meta) return;
+  if (!isHost || !meta || meta.status !== "lobby" || startingMatch) return;
+  startingMatch = true;
+  setTimeout(() => { startingMatch = false; }, 2000);
   const n = Math.min(10, Math.max(1, meta.rounds || 4));
   let seq = [];
   while (seq.length < n) seq = seq.concat(shuffleArr(GAME_IDS));
@@ -847,10 +855,13 @@ async function runResult(token) {
     if (resultToken !== token) return;
   }
 
-  const ids = Object.keys(playersCache).sort((a, b) => (playersCache[a].joined || 0) - (playersCache[b].joined || 0));
+  // 스냅샷 — 연출(~10초) 도중 누가 방을 나가도 접근 오류 없이 끝까지 그린다
+  const snap = Object.assign({}, playersCache);
+  const pOf = pid => playersCache[pid] || snap[pid] || { nick: "?", score: 0 };
+  const ids = realIds().sort((a, b) => (pOf(a).joined || 0) - (pOf(b).joined || 0));
   const charMap = {};
   for (const pid of ids) {
-    const el = makeChar({ color: colorOf(pid), nick: playersCache[pid].nick, size: 62 });
+    const el = makeChar({ color: colorOf(pid), nick: pOf(pid).nick, size: 62 });
     if (pid === UID) el.classList.add("me");
     const d = document.createElement("div");
     d.className = "char-detail";
@@ -905,16 +916,17 @@ async function runResult(token) {
     }
   }
 
-  // 현재 점수판
-  const sorted = ids.slice().sort((a, b) => (playersCache[b].score || 0) - (playersCache[a].score || 0));
+  // 현재 점수판 — 연출 도중 나간 사람은 제외
+  const sorted = ids.filter(pid => isRealPlayer(playersCache[pid]))
+    .sort((a, b) => (pOf(b).score || 0) - (pOf(a).score || 0));
   scoreEl.innerHTML = "";
   for (const pid of sorted) {
     const chip = document.createElement("span");
     chip.className = "score-chip sketch";
     chip.style.setProperty("--pc", colorOf(pid));
     chip.innerHTML = `<b></b> <span></span>`;
-    chip.querySelector("b").textContent = playersCache[pid].nick;
-    chip.querySelector("span").textContent = `${playersCache[pid].score || 0}점`;
+    chip.querySelector("b").textContent = pOf(pid).nick;
+    chip.querySelector("span").textContent = `${pOf(pid).score || 0}점`;
     scoreEl.appendChild(chip);
   }
 }
@@ -932,10 +944,11 @@ const GAME_SHORT = {
 // 팡파레·음악·컨페티만 1회.
 let finalSig = "";
 function renderFinal() {
-  const ids = Object.keys(playersCache).sort((a, b) =>
+  const ids = realIds().sort((a, b) =>
     (playersCache[b].score || 0) - (playersCache[a].score || 0) ||
     (playersCache[a].joined || 0) - (playersCache[b].joined || 0)
   );
+  if (!ids.length) return;
   const sig = ids.map(pid => pid + ":" + (playersCache[pid].score || 0)).join(",");
   if (finalShown && sig === finalSig) {
     $("btnAgain").style.display = isHost ? "" : "none";
@@ -1154,7 +1167,7 @@ async function hostEndPlay(byTimer) {
   };
   const mult = meta.spicy ? 3 : 1; // 스파이시 라운드: 점수 3배 (+/- 모두)
   const delta = {};
-  for (const pid of Object.keys(playersCache)) {
+  for (const pid of realIds()) {
     // 게임이 자체 점수(delta)를 주면 그걸 사용 (예: 보스 막타 +3 독식)
     const base = res.delta && res.delta[pid] !== undefined
       ? res.delta[pid]
@@ -1230,10 +1243,25 @@ setInterval(() => {
   }
 }, 250);
 
-// 호스트 틱 — 조기종료 폴링 + 봇 구동
+// 방장 청소: 점수 기록과 퇴장이 엇갈리며 되살아난 유령 항목({score}만 있는 플레이어)을 제거
+let janitorBusy = {};
+function hostJanitor() {
+  if (!isHost || !room) return;
+  for (const [pid, p] of Object.entries(playersCache)) {
+    if (isRealPlayer(p) || janitorBusy[pid]) continue;
+    janitorBusy[pid] = true;
+    const updates = { [`players/${pid}`]: null };
+    if (p && p.color >= 0 && colorsCache[p.color] === pid) updates[`colors/${p.color}`] = null;
+    net.dbUpdate(`rooms/${room}`, updates)
+      .catch(() => {})
+      .finally(() => { delete janitorBusy[pid]; });
+  }
+}
+
+// 호스트 틱 — 조기종료 폴링 + 봇 구동 + 유령 청소
 // 주의: botDrive는 반드시 이 인터벌에서만 호출할 것.
 // onGameData(입력 변경 이벤트)에서 부르면 "쓰기→이벤트→쓰기" 폭주가 생긴다.
-setInterval(() => { hostCheckEarly(); botDrive(); }, 450);
+setInterval(() => { hostCheckEarly(); botDrive(); hostJanitor(); }, 450);
 
 // ═════════════════════════════════════════════
 // 테스트용 봇 (콘솔에서 __sm.addBots(3))
