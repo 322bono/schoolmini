@@ -95,7 +95,8 @@ function makeCtx(over = {}) {
     tsSentinel: net.ts,
     writeInput: fields => net.dbUpdate(`rooms/${room}/game/inputs/${UID}`, fields),
     writeState: patch => net.dbUpdate(`rooms/${room}/game/state`, patch),
-    txn: (path, fn) => net.dbTxn(`rooms/${room}/${path}`, fn)
+    txn: (path, fn, opts) => net.dbTxn(`rooms/${room}/${path}`, fn, opts),
+    spicy: () => !!(meta && meta.spicy)
   }, over);
 }
 
@@ -1172,7 +1173,11 @@ async function hostEndPlay(byTimer) {
     const base = res.delta && res.delta[pid] !== undefined
       ? res.delta[pid]
       : (outcome[pid] === "win" ? 1 : outcome[pid] === "mid" ? 0 : -1);
-    const d = base * mult;
+    // 게임이 스파이시 전용 점수(spicyDelta)를 주면 ×배율 대신 그 값을 그대로 사용
+    // (예: 보스 막타는 ×3=+9이 과해서 스파이시라도 +5 고정)
+    const d = (meta.spicy && res.spicyDelta && res.spicyDelta[pid] !== undefined)
+      ? res.spicyDelta[pid]
+      : base * mult;
     delta[pid] = d;
     updates[`players/${pid}/score`] = (playersCache[pid].score || 0) + d;
   }
@@ -1329,7 +1334,7 @@ function botDrive() {
           const nhp = cur.hp - dmg;
           if (nhp <= 0) return Object.assign({}, cur, { hp: 0, killer: pid, killAt: t });
           return Object.assign({}, cur, { hp: nhp });
-        }).catch(() => {});
+        }, { applyLocally: false }).catch(() => {});
       }
     } else if (g === "spin") {
       if (state && state.startAt && t > state.startAt + 6200 && !inp) {

@@ -43,7 +43,7 @@ export const dbSet = (path, val) => set(r(path), val);
 export const dbUpdate = (path, obj) => update(r(path), obj);
 export const dbRemove = path => remove(r(path));
 export const dbGet = async path => (await get(r(path))).val();
-export const dbTxn = (path, fn) => runTransaction(r(path), fn);
+export const dbTxn = (path, fn, opts) => runTransaction(r(path), fn, opts);
 export function dbWatch(path, cb) {
   return onValue(r(path), snap => cb(snap.val()));
 }

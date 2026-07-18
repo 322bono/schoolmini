@@ -802,7 +802,7 @@ const choseki = {
       <div class="cs-wrap">
         <div class="cs-target" id="csTarget">목표: <b>?초</b></div>
         <div class="cs-clock sketch" id="csClock">3</div>
-        <div class="cs-note" id="csNote">시계는 1.2초만 보여! 감으로 세!</div>
+        <div class="cs-note" id="csNote">시계가 서서히 사라져! 감으로 세!</div>
         <div class="cs-minirow" id="csRow"></div>
       </div>`;
     c.clock = stage.querySelector("#csClock");
@@ -826,9 +826,11 @@ const choseki = {
       c.pressed = true;
       btn.disabled = true;
       const e = Math.round(ctx.now() - state.startAt);
-      // 프론트에서 즉시 내 기록 확정 표시 — 서버 왕복을 기다리지 않음
+      // 프론트에서 즉시 내 기록 확정 표시 — 서버 왕복을 기다리지 않음 (페이드 없이 바로 선명하게)
       clearTimeout(c.fadeTimer);
       c.clock.classList.remove("hidden-time", "cs-fading");
+      c.clock.style.transition = "none";
+      c.clock.style.opacity = "1";
       c.clock.textContent = (e / 1000).toFixed(2);
       ctx.writeInput({ e });
       const el = c.map[ctx.uid];
@@ -860,21 +862,12 @@ const choseki = {
     }
     if (c.pressed) return; // 눌렀으면 내 기록을 고정 표시 — 시계 갱신 중단
     const e = t - state.startAt;
-    if (e < 1200) {
-      clearTimeout(c.fadeTimer);
-      c.hiding = false;
-      c.clock.classList.remove("hidden-time", "cs-fading");
-      c.clock.textContent = (e / 1000).toFixed(2);
-    } else if (!c.hiding) {
-      // 숫자를 바로 끊어버리지 않고, 서서히 페이드아웃한 뒤 가려진 표시로 교체
+    // 초를 계속 카운트해서 보여주되, 1.8초부터 서서히 페이드아웃하며 자연스럽게 사라짐
+    // (숫자를 "?.?? 🙈"로 가리지 않고, 보이는 채로 opacity가 천천히 0이 됨)
+    c.clock.textContent = (e / 1000).toFixed(2);
+    if (e >= 1800 && !c.hiding) {
       c.hiding = true;
       c.clock.classList.add("cs-fading");
-      c.fadeTimer = setTimeout(() => {
-        if (!c.clock) return;
-        c.clock.classList.add("hidden-time");
-        c.clock.textContent = "?.?? 🙈";
-        c.clock.classList.remove("cs-fading");
-      }, 450);
     }
   },
 
@@ -2220,7 +2213,7 @@ const boss = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { lastCount: -1, started: false, pending: 0, lastFlush: 0, flushing: false, killShown: false };
+    const c = this._c = { lastCount: -1, started: false, pending: 0, lastFlush: 0, flushing: false, shownKiller: null };
     stage.innerHTML = `
       <div class="boss-wrap">
         <div class="boss-hpbar sketch">
@@ -2259,7 +2252,11 @@ const boss = {
     return Math.max(0, (state.hp || 0) - (c ? c.pending : 0));
   },
 
-  /** 쌓인 내 타격을 공유 HP에 트랜잭션으로 반영 — 0을 만든 사람이 막타 */
+  /** 쌓인 내 타격을 공유 HP에 트랜잭션으로 반영 — 0을 만든 사람이 막타
+   *  applyLocally:false — Firebase가 트랜잭션을 로컬에 낙관 적용하지 않게 한다.
+   *  이게 없으면 두 명이 거의 동시에 막타를 넣을 때, 각 기기가 "내가 죽였다"는
+   *  낙관값을 잠깐 보고 killShown이 그 값에 고정 → 폰마다 막타 주인공이 다르게 표시됨.
+   *  (HP 즉시 피드백은 c.pending 로컬 표시가 담당하므로 체감 지연 없음) */
   _flush(ctx) {
     const c = this._c;
     if (!c || !c.pending || c.flushing) return;
@@ -2271,7 +2268,7 @@ const boss = {
       const nhp = cur.hp - dmg;
       if (nhp <= 0) return Object.assign({}, cur, { hp: 0, killer: ctx.uid, killAt: ctx.now() });
       return Object.assign({}, cur, { hp: nhp });
-    }).then(res => {
+    }, { applyLocally: false }).then(res => {
       c.flushing = false;
       if (res && res.committed) c.pending = Math.max(0, c.pending - dmg);
       else c.pending = 0; // 이미 죽었으면 버림
@@ -2296,10 +2293,13 @@ const boss = {
     c.fill.style.width = pct + "%";
     c.txt.textContent = state.killer ? "0%" : Math.ceil(pct) + "%";
     c.fill.classList.toggle("low", pct < 15);
-    // 막타 연출
-    if (state.killer && !c.killShown) {
-      c.killShown = true;
+    // 막타 연출 — 표시 중인 막타 주인공이 바뀌면 다시 그림(모든 기기 동일 표시 보장).
+    // applyLocally:false로 낙관값이 애초에 안 들어오지만, 방장 승계 등 예외 대비 방어.
+    if (state.killer && c.shownKiller !== state.killer) {
+      const first = !c.shownKiller;
+      c.shownKiller = state.killer;
       const p = ctx.players()[state.killer];
+      const bonus = ctx.spicy && ctx.spicy() ? 5 : 3; // 스파이시 라운드 막타는 +5
       c.jar.textContent = "💥";
       c.jar.classList.add("boss-dead");
       c.kill.style.display = "";
@@ -2308,8 +2308,8 @@ const boss = {
       c.kill.append("막타!!! ");
       const kb = document.createElement("b");
       kb.textContent = p ? p.nick : "?";
-      c.kill.append(kb, " +3");
-      sfx.boom();
+      c.kill.append(kb, " +" + bonus);
+      if (first) sfx.boom();
       if (state.killer === ctx.uid) { sfx.win(); vibrate(300); }
     }
   },
@@ -2321,12 +2321,15 @@ const boss = {
   },
   evaluate(ctx, inputs, state) {
     const killer = state ? state.killer : null;
-    const outcome = {}, detail = {}, delta = {};
+    // 스파이시 라운드 막타는 +5 고정(일반 ×3=+9은 과함). spicyDelta로 앱에 알림.
+    const spicy = ctx.spicy && ctx.spicy();
+    const bonus = spicy ? 5 : 3;
+    const outcome = {}, detail = {}, delta = {}, spicyDelta = {};
     for (const pid of Object.keys(ctx.players())) {
-      if (pid === killer) { outcome[pid] = "win"; detail[pid] = "막타!!! 👑 +3"; delta[pid] = 3; }
-      else { outcome[pid] = "mid"; detail[pid] = killer ? "아깝다! (±0)" : "항아리가 버텼다… (±0)"; delta[pid] = 0; }
+      if (pid === killer) { outcome[pid] = "win"; detail[pid] = `막타!!! 👑 +${bonus}`; delta[pid] = 3; spicyDelta[pid] = 5; }
+      else { outcome[pid] = "mid"; detail[pid] = killer ? "아깝다! (±0)" : "항아리가 버텼다… (±0)"; delta[pid] = 0; spicyDelta[pid] = 0; }
     }
-    return { outcome, detail, delta };
+    return { outcome, detail, delta, spicyDelta };
   },
   unmount() {
     const c = this._c;
@@ -3433,10 +3436,10 @@ const balloon = {
 // ═════════════════════════════════════════════
 const BOLT_LEAD = 3000;
 const BOLT_DUR = 30000;
-const BOLT_WARN = 1000;      // 예고(느낌표) → 낙뢰까지 시간
+const BOLT_WARN = 1250;      // 예고(느낌표) → 낙뢰까지 시간 (반응시간 여유 ↑)
 const BOLT_COLS = 9;         // 격자 열 (골고루 떨어지게 하는 기준)
-const BOLT_HIT_HALF = 7;     // 명중 판정 반경 (% 단위, 좌우)
-const BOLT_MOVE = 46;        // 이동 속도 (%/초)
+const BOLT_HIT_HALF = 5.5;   // 명중 판정 반경 (% 단위, 좌우) — 얇게 해서 피하기 쉽게
+const BOLT_MOVE = 58;        // 이동 속도 (%/초) — 더 빠릿하게 피함
 
 /** 시드로 30초간의 낙뢰 스케줄 생성 — 모든 클라가 동일하게 봄.
  *  시간이 갈수록 빈도↑, 동시 개수↑. 매 라운드(9열 순열)로 열을 순회해
@@ -3456,8 +3459,8 @@ function genBolts(seed) {
   };
   while (t < BOLT_DUR) {
     const prog = t / BOLT_DUR;               // 0→1
-    // 동시 낙뢰 수: 초반 1개 → 후반 최대 3~4개
-    const salvo = 1 + Math.floor(prog * 3 + rng() * 0.9);
+    // 동시 낙뢰 수: 초반 1개 → 후반 최대 3개 정도 (난이도 완화)
+    const salvo = 1 + Math.floor(prog * 2.2 + rng() * 0.8);
     const cols = new Set();
     for (let k = 0; k < salvo; k++) cols.add(draw());
     for (const col of cols) {
@@ -3466,8 +3469,8 @@ function genBolts(seed) {
       const x = Math.round((col + 0.5) * cw + (rng() - 0.5) * cw * 0.5);
       bolts.push({ id: id++, at: t, x: Math.max(4, Math.min(96, x)) });
     }
-    // 간격: 초반 1200ms → 후반 380ms
-    t += 380 + (1 - prog) * 900 + rng() * 260;
+    // 간격: 초반 ~1450ms → 후반 ~520ms (예전 380ms보다 여유)
+    t += 520 + (1 - prog) * 900 + rng() * 280;
   }
   return bolts;
 }

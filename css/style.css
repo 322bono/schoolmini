@@ -618,7 +618,7 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
   font-size: clamp(3.4rem, 13vw, 5.2rem); font-weight: 700;
   padding: 0.05em 0.5em; min-width: 4.2em; text-align: center;
   font-variant-numeric: tabular-nums;
-  opacity: 1; transition: opacity 0.45s ease;
+  opacity: 1; transition: opacity 1.6s ease-in; /* 1.8초부터 서서히 사라지는 느낌 */
 }
 .cs-clock.hidden-time { color: var(--ink-soft); letter-spacing: 0.1em; }
 .cs-clock.cs-fading { opacity: 0; }
