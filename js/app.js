@@ -936,7 +936,7 @@ const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
-  voice: "성대모사", omr: "찍기"
+  voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1350,6 +1350,20 @@ function botDrive() {
         if (qi < 10 && Math.random() < 0.5) {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { ["a" + qi]: Math.floor(Math.random() * 5) });
         }
+      }
+    } else if (g === "balloon") {
+      if (state && state.startAt && t > state.startAt && !(inp && inp.pop)) {
+        // 봇은 목표 크기까지만 부풀림 (터지기 전 멈춤 — 다양성 위해 봇마다 다른 목표)
+        const cap = (window.__SM_BOT_BALLOON || 55) + (Math.abs(pid.charCodeAt(pid.length - 1)) % 30);
+        const cur = (inp && inp.s) || 12;
+        if (cur < cap) net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { s: Math.min(cap, cur + 4 + Math.floor(Math.random() * 5)), pop: 0 });
+      }
+    } else if (g === "bolt") {
+      if (state && state.startAt && t > state.startAt && !(inp && inp.dead)) {
+        // 봇은 대충 좌우로 왔다갔다 (완벽히 피하진 못함)
+        const e = t - state.startAt;
+        const x = 50 + Math.sin((e / 700) + pid.charCodeAt(pid.length - 1)) * 42;
+        net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { x: Math.round(x * 10) / 10, e: Math.round(e) });
       }
     } else if (g === "mugunghwa") {
       if (!state || state.sub !== "run" || pid === state.tagger) continue;

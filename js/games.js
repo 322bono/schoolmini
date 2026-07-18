@@ -3257,6 +3257,477 @@ const omr = {
 };
 
 // ═════════════════════════════════════════════
+// 17. 풍선 키우기!
+// ═════════════════════════════════════════════
+const BAL_LEAD = 3000;
+const BAL_DUR = 15000;
+const BAL_POP = 100;         // 터지는 크기
+const BAL_PER_PUMP = 3.2;    // 한 번 눌러 커지는 양
+const BAL_LEAK = 2.6;        // 초당 자연 수축 (안 누르면 쪼그라듦 → 계속 눌러야 함)
+
+const balloon = {
+  id: "balloon",
+  name: "풍선 키우기!",
+  tag: "터지기 직전까지! 크게 부풀려!",
+
+  stampOnTimeout: false, // 시간 종료가 정상 흐름
+  duration: () => BAL_LEAD + BAL_DUR + 2600,
+  hostSetup(ctx) {
+    return { startAt: ctx.playStart + BAL_LEAD };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, ended: false, popped: false,
+      size: 12, best: 12, lastWrite: 0, lastPumpAt: 0
+    };
+    stage.innerHTML = `
+      <div class="bal-wrap">
+        <div class="bal-top">
+          <span class="sketch hud-chip">내 최고: <b id="balBest">0</b></span>
+          <span class="wa-count" id="balCount"></span>
+        </div>
+        <div class="bal-stage" id="balStage">
+          <div class="bal-balloon" id="balBalloon">
+            <div class="bal-face" id="balFace">😀</div>
+          </div>
+          <div class="bal-knot"></div>
+          <div class="bal-string"></div>
+        </div>
+      </div>`;
+    dock.innerHTML = "";
+    const btn = actionBtn(dock, "펌프!! 🎈");
+    btn.disabled = true;
+    c.btn = btn;
+    c.balloon = stage.querySelector("#balBalloon");
+    c.face = stage.querySelector("#balFace");
+    c.bestEl = stage.querySelector("#balBest");
+    c.countEl = stage.querySelector("#balCount");
+    const pump = e => {
+      e.preventDefault();
+      if (!c.started || c.ended || c.popped) return;
+      c.size += BAL_PER_PUMP;
+      c.lastPumpAt = ctx.now();
+      sfx.pop();
+      c.balloon.classList.remove("bal-pump");
+      void c.balloon.offsetWidth;
+      c.balloon.classList.add("bal-pump");
+      this._checkPop(ctx);
+    };
+    btn.addEventListener("pointerdown", pump);
+    c.stopLoop = gameLoop((t, dt) => this._tick(ctx, dt));
+  },
+
+  _checkPop(ctx) {
+    const c = this._c;
+    if (!c || c.popped) return;
+    if (c.size >= BAL_POP) {
+      c.popped = true;
+      c.ended = true;
+      c.size = BAL_POP;
+      this._render();
+      c.balloon.classList.add("bal-boom");
+      c.face.textContent = "💥";
+      if (c.btn) { c.btn.disabled = true; c.btn.textContent = "터졌다… 💥"; }
+      sfx.boom(); vibrate(300);
+      // 터진 사람은 크기 0으로 기록 → 최하위권
+      ctx.writeInput({ s: 0, pop: 1 });
+      c.best = 0;
+      c.bestEl.textContent = 0;
+    }
+  },
+
+  _tick(ctx, dt) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || typeof state.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; if (c.btn) c.btn.disabled = false; c.countEl.textContent = ""; gameStartFx(); }
+    // 남은 시간
+    const remain = Math.max(0, state.startAt + BAL_DUR - t);
+    if (!c.ended) {
+      const rs = Math.ceil(remain / 1000);
+      const txt = rs + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      // 자연 수축 — 계속 눌러야 유지됨 (단, 터진 사람은 제외)
+      if (!c.popped) {
+        c.size = Math.max(12, c.size - BAL_LEAK * dt);
+        if (c.size > c.best) { c.best = c.size; if (c.bestEl) c.bestEl.textContent = Math.round(c.best); }
+        this._render();
+        // 주기적으로 현재 최고 크기 공유 (연출용)
+        if (t - c.lastWrite > 400) { c.lastWrite = t; ctx.writeInput({ s: Math.round(c.best) }); }
+      }
+      if (remain <= 0) {
+        c.ended = true;
+        if (c.btn) { c.btn.disabled = true; c.btn.textContent = "끝!! 손 떼!!"; }
+        ctx.writeInput({ s: Math.round(c.best), pop: c.popped ? 1 : 0 });
+        sfx.whistle();
+      }
+    }
+  },
+
+  _render() {
+    const c = this._c;
+    if (!c || !c.balloon) return;
+    // 크기 12~100 → 지름 64~260px
+    const px = 64 + (Math.min(BAL_POP, c.size) - 12) / (BAL_POP - 12) * 196;
+    c.balloon.style.width = px + "px";
+    c.balloon.style.height = px * 1.16 + "px";
+    // 위험 표시 (80 이상 빨개지고 떨림)
+    const danger = c.size >= 80;
+    c.balloon.classList.toggle("bal-danger", danger && !c.popped);
+    if (!c.popped) c.face.textContent = c.size >= 90 ? "😱" : c.size >= 78 ? "😰" : c.size >= 55 ? "😳" : "😀";
+  },
+
+  onState() {},
+  onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || typeof state.startAt !== "number") return false;
+    // 전원 터졌거나(=탈락) 시간 종료
+    if (ctx.now() > state.startAt + BAL_DUR + 700) return 1400;
+    const players = Object.keys(ctx.players());
+    const allPopped = players.length > 0 && players.every(pid => inputs && inputs[pid] && inputs[pid].pop);
+    return allPopped ? 1400 : false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    // 크기순 정렬 (터진 사람 s=0 → 최하위)
+    const played = players
+      .filter(p => inputs[p] && typeof inputs[p].s === "number")
+      .sort((a, b) => inputs[b].s - inputs[a].s);
+    // 상위 40% +1, 나머지·터진 사람·미참여 -1 (중간층 없음)
+    const winCut = Math.max(1, Math.ceil(players.length * 0.4));
+    const outcome = {}, detail = {};
+    played.forEach((pid, i) => {
+      const popped = inputs[pid].pop;
+      if (i < winCut && !popped && inputs[pid].s > 12) {
+        outcome[pid] = "win"; detail[pid] = `크기 ${inputs[pid].s}! 🎈🏅`;
+      } else {
+        outcome[pid] = "lose";
+        detail[pid] = popped ? "펑! 터졌다… 💥" : `크기 ${inputs[pid].s}… 바람이 부족해`;
+      }
+    });
+    for (const pid of players) {
+      if (outcome[pid] === undefined) { outcome[pid] = "lose"; detail[pid] = "구경만 했다… 💤"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
+// 18. 번개 피하기!
+// ═════════════════════════════════════════════
+const BOLT_LEAD = 3000;
+const BOLT_DUR = 30000;
+const BOLT_WARN = 1000;      // 예고(느낌표) → 낙뢰까지 시간
+const BOLT_COLS = 9;         // 격자 열 (골고루 떨어지게 하는 기준)
+const BOLT_HIT_HALF = 7;     // 명중 판정 반경 (% 단위, 좌우)
+const BOLT_MOVE = 46;        // 이동 속도 (%/초)
+
+/** 시드로 30초간의 낙뢰 스케줄 생성 — 모든 클라가 동일하게 봄.
+ *  시간이 갈수록 빈도↑, 동시 개수↑. 매 라운드(9열 순열)로 열을 순회해
+ *  한 곳에 몰리지 않고 모든 구역에 골고루, 빈 구역 없이 떨어지게 함. */
+function genBolts(seed) {
+  const rng = mulberry32(seed);
+  const bolts = [];
+  let t = 1600;
+  let id = 0;
+  let bag = [];
+  const draw = () => {
+    if (!bag.length) {
+      bag = Array.from({ length: BOLT_COLS }, (_, i) => i);
+      for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [bag[i], bag[j]] = [bag[j], bag[i]]; }
+    }
+    return bag.pop();
+  };
+  while (t < BOLT_DUR) {
+    const prog = t / BOLT_DUR;               // 0→1
+    // 동시 낙뢰 수: 초반 1개 → 후반 최대 3~4개
+    const salvo = 1 + Math.floor(prog * 3 + rng() * 0.9);
+    const cols = new Set();
+    for (let k = 0; k < salvo; k++) cols.add(draw());
+    for (const col of cols) {
+      // 열 중심 % + 약간의 지터 (셀 폭 안에서)
+      const cw = 100 / BOLT_COLS;
+      const x = Math.round((col + 0.5) * cw + (rng() - 0.5) * cw * 0.5);
+      bolts.push({ id: id++, at: t, x: Math.max(4, Math.min(96, x)) });
+    }
+    // 간격: 초반 1200ms → 후반 380ms
+    t += 380 + (1 - prog) * 900 + rng() * 260;
+  }
+  return bolts;
+}
+
+const bolt = {
+  id: "bolt",
+  name: "번개 피하기!",
+  tag: "30초간 살아남아라! ⚡",
+
+  stampOnTimeout: false,
+  duration: () => BOLT_LEAD + BOLT_DUR + 3200,
+  hostSetup(ctx) {
+    return { seed: Math.floor(Math.random() * 1e9), startAt: ctx.playStart + BOLT_LEAD };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, dead: false, deadAt: 0,
+      myX: 20 + Math.random() * 60, targetX: null,
+      bolts: null, spawned: {}, struckShown: {}, chars: {}, lastWrite: 0, others: {}
+    };
+    stage.innerHTML = `
+      <div class="bolt-wrap">
+        <div class="bolt-top">
+          <span class="sketch hud-chip" id="boltChip">⚡ 살아남아!</span>
+          <span class="wa-count" id="boltCount"></span>
+        </div>
+        <div class="bolt-arena" id="boltArena">
+          <div class="bolt-ground"></div>
+        </div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">👈👉 바닥을 누르거나 좌우로 드래그해서 번개를 피해! (내 캐릭터: <b id="boltMeName"></b>)</div>`;
+    c.arena = stage.querySelector("#boltArena");
+    c.chipEl = stage.querySelector("#boltChip");
+    c.countEl = stage.querySelector("#boltCount");
+    const meName = dock.querySelector("#boltMeName");
+    const meP = ctx.players()[ctx.uid];
+    if (meName) { meName.textContent = meP ? meP.nick : "나"; meName.style.color = ctx.colorOf(ctx.uid); }
+
+    // 내 캐릭터 — 확실하게 눈에 띄게 (링 + "나" 화살표 + 확대)
+    const meEl = makeChar({ color: ctx.colorOf(ctx.uid), nick: (meP ? meP.nick : "나"), size: 52 });
+    meEl.classList.add("me", "bolt-me");
+    const mk = document.createElement("div");
+    mk.className = "you-mark"; mk.textContent = "▼ 나";
+    meEl.appendChild(mk);
+    c.arena.appendChild(meEl);
+    c.chars[ctx.uid] = meEl;
+    c.meEl = meEl;
+
+    // 조작: 아레나 탭 → 그 x로 이동 / 드래그 추종
+    const toX = clientX => {
+      const r = c.arena.getBoundingClientRect();
+      return Math.max(3, Math.min(97, ((clientX - r.left) / r.width) * 100));
+    };
+    const down = e => { if (c.dead) return; c.dragging = true; c.targetX = toX(e.clientX); };
+    const move = e => { if (c.dragging && !c.dead) c.targetX = toX(e.clientX); };
+    const up = () => { c.dragging = false; };
+    c.arena.addEventListener("pointerdown", down);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    c.cleanupWin = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    c.stopLoop = gameLoop((t, dt) => this._tick(ctx, dt));
+  },
+
+  _placeChar(el, x) { el.style.left = x + "%"; el.style.bottom = "6%"; },
+
+  _tick(ctx, dt) {
+    const c = this._c;
+    if (!c) return;
+    const state = ctx.state();
+    if (!state || typeof state.startAt !== "number") return;
+    if (!c.bolts && state.seed !== undefined) c.bolts = genBolts(state.seed);
+    const t = ctx.now();
+    if (t < state.startAt) {
+      const n = Math.ceil((state.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      this._placeChar(c.meEl, c.myX);
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); }
+    const e = t - state.startAt;
+
+    // 남은 시간 / 생존 표시
+    if (!c.dead) {
+      const remain = Math.max(0, BOLT_DUR - e);
+      const txt = Math.ceil(remain / 1000) + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      // 내 이동 (드래그/탭 목표로 부드럽게)
+      if (c.targetX !== null) {
+        const d = c.targetX - c.myX;
+        const step = BOLT_MOVE * dt * 2.2;
+        c.myX += Math.abs(d) <= step ? d : Math.sign(d) * step;
+      }
+      this._placeChar(c.meEl, c.myX);
+      // 위치 공유 (다른 화면에 내 캐릭터 표시)
+      if (t - c.lastWrite > 140) { c.lastWrite = t; ctx.writeInput({ x: Math.round(c.myX * 10) / 10, e: Math.round(e) }); }
+    }
+
+    // 다른 사람 캐릭터 렌더
+    this._renderOthers(ctx);
+
+    // 낙뢰 스케줄 처리
+    if (c.bolts) {
+      for (const b of c.bolts) {
+        // 예고(느낌표+위험구역): 낙뢰 1초 전
+        if (!c.spawned[b.id] && e >= b.at - BOLT_WARN && e < b.at) {
+          c.spawned[b.id] = true;
+          this._spawnWarn(b);
+        }
+        // 낙뢰: 명중 판정
+        if (!c.struckShown[b.id] && e >= b.at) {
+          c.struckShown[b.id] = true;
+          this._strike(ctx, b, e);
+        }
+      }
+    }
+
+    if (c.dead) {
+      const txt = "감전됐다… 💀";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+    }
+  },
+
+  _renderOthers(ctx) {
+    const c = this._c;
+    const inputs = ctx.inputs() || {};
+    for (const [pid, v] of Object.entries(inputs)) {
+      if (pid === ctx.uid || !ctx.players()[pid]) continue;
+      let el = c.chars[pid];
+      if (!el) {
+        el = makeChar({ color: ctx.colorOf(pid), nick: ctx.players()[pid].nick, size: 42 });
+        el.classList.add("bolt-other");
+        c.arena.appendChild(el);
+        c.chars[pid] = el;
+      }
+      if (v.dead && !el._dead) { el._dead = true; setFace(el, "dead"); setM(el, "caught"); el.style.opacity = 0.4; }
+      if (typeof v.x === "number") this._placeChar(el, v.x);
+    }
+  },
+
+  _spawnWarn(b) {
+    const c = this._c;
+    if (!c || !c.arena) return;
+    const warn = document.createElement("div");
+    warn.className = "bolt-warn";
+    warn.style.left = b.x + "%";
+    warn.innerHTML = `<div class="bolt-zone"></div><div class="bolt-excl">❗</div>`;
+    c.arena.appendChild(warn);
+    c._warns = c._warns || {};
+    c._warns[b.id] = warn;
+    sfx.beep();
+    setTimeout(() => { warn.remove(); }, BOLT_WARN + 500);
+  },
+
+  _strike(ctx, b, e) {
+    const c = this._c;
+    if (!c || !c.arena) return;
+    // 번쩍이는 번개 그리기
+    const flash = document.createElement("div");
+    flash.className = "bolt-strike";
+    flash.style.left = b.x + "%";
+    flash.textContent = "⚡";
+    c.arena.appendChild(flash);
+    // 화면 번쩍 + 전기 버즈
+    c.arena.classList.add("bolt-flashwhite");
+    setTimeout(() => c.arena.classList.remove("bolt-flashwhite"), 90);
+    sfx.buzz();
+    setTimeout(() => flash.remove(), 420);
+    // 내 명중 판정 (살아있을 때만)
+    if (!c.dead && Math.abs(c.myX - b.x) <= BOLT_HIT_HALF) {
+      c.dead = true;
+      c.deadAt = e;
+      setFace(c.meEl, "dead"); setM(c.meEl, "caught");
+      c.meEl.classList.add("bolt-zap");
+      c.chipEl.textContent = "💀 감전!";
+      vibrate(400);
+      ctx.writeInput({ x: Math.round(c.myX * 10) / 10, dead: 1, deadAt: Math.round(e) });
+    }
+  },
+
+  onState() {},
+  onInputs() {},
+
+  // 호스트: 스스로 판정할 수 없는 대상(봇/오프라인 플레이어)의 감전만 대신 판정.
+  // 접속 중인 실제 플레이어는 각자 자기 화면에서 즉시 판정한다(지연 0).
+  hostTick(ctx, state, inputs) {
+    if (!state || typeof state.seed !== "number" || typeof state.startAt !== "number") return;
+    const t = ctx.now();
+    const e = t - state.startAt;
+    if (e < 0) return;
+    const players = ctx.players();
+    if (!this._hostBolts || this._hostSeed !== state.seed) {
+      this._hostBolts = genBolts(state.seed);
+      this._hostSeed = state.seed;
+      this._hostStruck = {};
+    }
+    inputs = inputs || {};
+    for (const pid of Object.keys(players)) {
+      const p = players[pid];
+      const selfJudges = !p.bot && p.online !== false; // 실제 접속자는 스스로 판정
+      if (selfJudges) continue;
+      const inp = inputs[pid];
+      if (inp && inp.dead) continue;
+      const x = inp && typeof inp.x === "number" ? inp.x : (p.bot ? 50 : 50);
+      for (const b of this._hostBolts) {
+        if (b.at > e) break;
+        const key = pid + ":" + b.id;
+        if (this._hostStruck[key]) continue;
+        this._hostStruck[key] = true;
+        if (Math.abs(x - b.x) <= BOLT_HIT_HALF) {
+          ctx.txn(`game/inputs/${pid}`, cur =>
+            (cur && cur.dead ? undefined : Object.assign({}, cur, { dead: 1, deadAt: Math.round(b.at), x }))
+          ).catch(() => {});
+          break;
+        }
+      }
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || typeof state.startAt !== "number") return false;
+    const t = ctx.now();
+    const e = t - state.startAt;
+    if (e > BOLT_DUR + 400) return 1600; // 30초 생존 종료
+    // 전원 사망 시 조기 종료
+    const players = Object.keys(ctx.players());
+    const allDead = players.length > 0 && players.every(pid => inputs && inputs[pid] && inputs[pid].dead);
+    return allDead ? 1600 : false;
+  },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const outcome = {}, detail = {};
+    for (const pid of players) {
+      const inp = inputs[pid];
+      const survived = inp && !inp.dead;
+      if (survived) { outcome[pid] = "win"; detail[pid] = "30초 생존!! ⚡🏅"; }
+      else if (inp && inp.dead) {
+        const sec = ((inp.deadAt || 0) / 1000).toFixed(1);
+        outcome[pid] = "lose"; detail[pid] = `${sec}초에 감전… 💀`;
+      } else { outcome[pid] = "lose"; detail[pid] = "구경만 했다… 💤"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() {
+    const c = this._c;
+    if (!c) return;
+    if (c.stopLoop) c.stopLoop();
+    if (c.cleanupWin) c.cleanupWin();
+    this._hostBolts = null; this._hostSeed = undefined; this._hostStruck = null;
+    this._c = null;
+  }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -3454,5 +3925,28 @@ omr.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr };
+balloon.demo = () => {
+  const d = dmStage("dm-bal");
+  const bal = dmAt(dmProp("dm-bl-balloon"), "50%", "8%");
+  bal.appendChild(dmProp("dm-bl-face", "😀"));
+  d.appendChild(bal);
+  d.appendChild(dmAt(dmProp("dm-bl-string"), "50%", "44%"));
+  d.appendChild(dmAt(dmProp("dm-bl-btn demo-btn", "펌프!"), "50%", "66%"));
+  d.appendChild(dmAt(dmProp("dm-bl-tap", "👆"), "50%", "80%"));
+  d.appendChild(dmAt(dmProp("dm-bl-hint", "크게! 근데 터지면 탈락!"), "50%", "90%"));
+  return d;
+};
+
+bolt.demo = () => {
+  const d = dmStage("dm-bolt");
+  d.appendChild(dmAt(dmProp("dm-bt-cloud", "☁️"), "50%", "0%"));
+  d.appendChild(dmAt(dmProp("dm-bt-zone"), "70%", "20%"));
+  d.appendChild(dmAt(dmProp("dm-bt-excl", "❗"), "70%", "10%"));
+  d.appendChild(dmAt(dmProp("dm-bt-strike", "⚡"), "70%", "18%"));
+  d.appendChild(dmAt(dmChar(1, "dm-bt-char", 42), "40%", "58%"));
+  d.appendChild(dmAt(dmProp("dm-bt-hint", "번개를 피해 30초 생존!"), "50%", "88%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt };

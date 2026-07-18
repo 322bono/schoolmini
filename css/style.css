@@ -1135,6 +1135,40 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmOmO { 0%, 74% { opacity: 0; transform: scale(1.9); } 80%, 96% { opacity: 1; transform: scale(1); } 100% { opacity: 0; } }
 .dm-om-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
+/* 풍선: 펌프로 키우다 터지면 탈락 */
+.dm-bl-balloon {
+  width: 46px; height: 54px;
+  background: radial-gradient(circle at 38% 32%, #ff8f7a, var(--red) 62%);
+  border: 3px solid var(--ink); border-radius: 50% 50% 48% 48%;
+  display: flex; align-items: center; justify-content: center;
+  transform-origin: 50% 100%;
+  animation: dmBlGrow 3.4s ease-in-out infinite;
+}
+@keyframes dmBlGrow {
+  0% { transform: translateX(-50%) scale(0.6); }
+  60% { transform: translateX(-50%) scale(1.5); }
+  70% { transform: translateX(-50%) scale(1.65); opacity: 1; }
+  74% { transform: translateX(-50%) scale(2); opacity: 0; }
+  75%, 100% { transform: translateX(-50%) scale(0.6); opacity: 1; }
+}
+.dm-bl-face { position: static; transform: none; font-size: 1.1rem; }
+.dm-bl-string { width: 3px; height: 40px; background: var(--ink); opacity: 0.5; }
+.dm-bl-btn { font-size: 1rem; }
+.dm-bl-tap { font-size: 1.5rem; animation: dmMTap 0.4s ease-in-out infinite; }
+.dm-bl-hint { font-size: 0.92rem; color: var(--ink-soft); }
+
+/* 번개: 예고 뜬 곳을 피해 이동 */
+.dm-bt-cloud { font-size: 1.8rem; }
+.dm-bt-zone { width: 34px; height: 90px; background: repeating-linear-gradient(0deg, rgba(255,225,77,0.35) 0 7px, rgba(255,225,77,0.1) 7px 14px); border-left: 2px dashed rgba(224,180,40,0.8); border-right: 2px dashed rgba(224,180,40,0.8); opacity: 0; animation: dmBtZone 2.6s infinite; }
+@keyframes dmBtZone { 0%, 20% { opacity: 0; } 30%, 55% { opacity: 1; } 60%, 100% { opacity: 0; } }
+.dm-bt-excl { font-size: 1.5rem; opacity: 0; animation: dmBtExcl 2.6s infinite; }
+@keyframes dmBtExcl { 0%, 22% { opacity: 0; } 30%, 55% { opacity: 1; transform: translateX(-50%) scale(1.15); } 60%, 100% { opacity: 0; } }
+.dm-bt-strike { font-size: 2.4rem; color: #fff; text-shadow: 0 0 10px #ffe14d; opacity: 0; animation: dmBtStrike 2.6s infinite; }
+@keyframes dmBtStrike { 0%, 58% { opacity: 0; } 62%, 68% { opacity: 1; } 74%, 100% { opacity: 0; } }
+.dm-bt-char { animation: dmBtDodge 2.6s ease-in-out infinite; }
+@keyframes dmBtDodge { 0%, 40% { left: 40%; } 58%, 100% { left: 18%; } }
+.dm-bt-hint { font-size: 0.92rem; color: var(--ink-soft); }
+
 /* 성대모사: 듣고 → 따라하고 → 채점 */
 .dm-vc-spk { font-size: 2rem; animation: vcPulse 0.9s ease-in-out infinite; }
 .dm-vc-note { font-size: 1.3rem; color: var(--blue); opacity: 0; animation: dmVcNote 1.8s linear infinite; }
@@ -1206,6 +1240,77 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 }
 @keyframes omrPop { from { transform: scale(2.1); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes omrSlash { from { transform: translate(-50%, -50%) rotate(-38deg) scaleX(0); } }
+
+/* ── 풍선 키우기! ─────────────────────────── */
+.bal-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-height: 0; }
+.bal-top { display: flex; gap: 0.9rem; align-items: center; min-height: 2.2em; }
+.bal-stage {
+  flex: 1; width: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  position: relative; padding-bottom: 0.5rem; min-height: 0;
+}
+.bal-balloon {
+  width: 64px; height: 74px;
+  background: radial-gradient(circle at 38% 32%, #ff8f7a, var(--red) 62%);
+  border: 3px solid var(--ink);
+  border-radius: 50% 50% 48% 48%;
+  position: relative;
+  display: flex; align-items: center; justify-content: center;
+  transition: width 0.12s cubic-bezier(0.3, 1.6, 0.5, 1), height 0.12s cubic-bezier(0.3, 1.6, 0.5, 1);
+  box-shadow: inset -6px -8px 0 rgba(0, 0, 0, 0.08);
+}
+.bal-balloon::after { /* 풍선 매듭 */
+  content: ""; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%);
+  width: 12px; height: 10px; background: var(--red); border: 3px solid var(--ink);
+  border-radius: 0 0 50% 50%; clip-path: polygon(20% 0, 80% 0, 100% 100%, 0 100%);
+}
+.bal-face { font-size: 1.5rem; }
+.bal-balloon.bal-pump { animation: balPump 0.16s ease-out; }
+@keyframes balPump { 0% { transform: scale(1.08, 0.94); } 100% { transform: scale(1); } }
+.bal-balloon.bal-danger { border-color: var(--red); animation: balShake 0.14s linear infinite; box-shadow: inset -6px -8px 0 rgba(0,0,0,0.08), 0 0 0 4px rgba(224,71,47,0.25); }
+@keyframes balShake { 0%,100% { transform: translate(-1.5px, 0) rotate(-1.5deg); } 50% { transform: translate(1.5px, 0) rotate(1.5deg); } }
+.bal-balloon.bal-boom { animation: balBoom 0.4s forwards; }
+@keyframes balBoom { 0% { transform: scale(1.25); opacity: 1; } 40% { transform: scale(1.5); opacity: 0.5; } 100% { transform: scale(0.2); opacity: 0; } }
+.bal-string { width: 3px; height: 22vh; max-height: 180px; background: var(--ink); opacity: 0.55; }
+
+/* ── 번개 피하기! ─────────────────────────── */
+.bolt-wrap { flex: 1; display: flex; flex-direction: column; gap: 0.4rem; min-height: 0; }
+.bolt-top { display: flex; gap: 0.9rem; align-items: center; justify-content: center; min-height: 2.2em; }
+#boltMeName { font-weight: 700; }
+.bolt-arena {
+  flex: 1; position: relative; width: 100%;
+  background: linear-gradient(#3a4a6b, #6a7a9b);
+  border: 3px solid var(--ink); border-radius: 12px;
+  overflow: hidden; min-height: 0;
+  touch-action: none; cursor: pointer;
+}
+.bolt-ground { position: absolute; left: 0; right: 0; bottom: 0; height: 12%; background: #5a4632; border-top: 3px solid #3a2c1e; }
+.bolt-arena .char { position: absolute; transform: translateX(-50%); transition: left 0.05s linear; z-index: 3; }
+.bolt-me { z-index: 5 !important; filter: drop-shadow(0 0 0 #fff); }
+.bolt-me::before { /* 내 캐릭터 강조 링 */
+  content: ""; position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+  width: 130%; height: 130%; border: 3.5px dashed var(--hl); border-radius: 50%;
+  animation: boltMeRing 2s linear infinite; pointer-events: none;
+}
+@keyframes boltMeRing { to { transform: translate(-50%, -50%) rotate(360deg); } }
+.bolt-me .you-mark { color: var(--hl); font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,0.6); }
+.bolt-other { opacity: 0.82; }
+.bolt-warn { position: absolute; top: 0; bottom: 12%; transform: translateX(-50%); width: 13%; z-index: 2; pointer-events: none; }
+.bolt-zone { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, rgba(255,225,77,0.28) 0 8px, rgba(255,225,77,0.08) 8px 16px); border-left: 2px dashed rgba(255,225,77,0.7); border-right: 2px dashed rgba(255,225,77,0.7); animation: boltWarnPulse 0.4s ease-in-out infinite; }
+@keyframes boltWarnPulse { 50% { opacity: 0.5; } }
+.bolt-excl { position: absolute; top: 4%; left: 50%; transform: translateX(-50%); font-size: 1.7rem; animation: boltExcl 0.35s ease-in-out infinite; }
+@keyframes boltExcl { 50% { transform: translateX(-50%) scale(1.25); } }
+.bolt-strike {
+  position: absolute; top: 0; bottom: 12%; transform: translateX(-50%);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 3rem; z-index: 4; pointer-events: none;
+  color: #fff; text-shadow: 0 0 12px #ffe14d, 0 0 24px #fff;
+  animation: boltFlash 0.42s ease-out forwards;
+}
+@keyframes boltFlash { 0% { opacity: 0; transform: translateX(-50%) scaleY(0.3); } 15% { opacity: 1; transform: translateX(-50%) scaleY(1); } 40% { opacity: 1; } 100% { opacity: 0; } }
+.bolt-arena.bolt-flashwhite::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,0.5); }
+.char.bolt-zap { animation: boltZap 0.4s linear; }
+@keyframes boltZap { 0%,100% { filter: none; } 25%,75% { filter: brightness(3) sepia(1) hue-rotate(-20deg); } }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {
