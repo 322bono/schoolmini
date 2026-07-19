@@ -3733,6 +3733,550 @@ const bolt = {
 };
 
 // ═════════════════════════════════════════════
+// 19. 폭탄 돌리기!
+// ═════════════════════════════════════════════
+const BOMB_LEAD = 3000;
+const BOMB_MIN = 7000, BOMB_MAX = 15000;
+const BOMB_HOLD_MIN = 450; // 받자마자 즉시 되던지기 방지 (최소 보유시간)
+
+const bomb = {
+  id: "bomb",
+  name: "폭탄 돌리기!",
+  tag: "터지기 전에 다른 사람에게 넘겨!",
+
+  stampOnTimeout: false,
+  duration: () => BOMB_LEAD + BOMB_MAX + 4200,
+  hostSetup(ctx) {
+    const players = ctx.players();
+    const ids = Object.keys(players);
+    const humans = ids.filter(id => !players[id].bot && players[id].online !== false);
+    const pool = humans.length ? humans : ids;
+    const holder = pool[Math.floor(Math.random() * pool.length)];
+    const startAt = ctx.playStart + BOMB_LEAD;
+    return {
+      holder, lastPasser: null, holdSince: startAt, startAt,
+      fuseEnd: startAt + BOMB_MIN + Math.floor(Math.random() * (BOMB_MAX - BOMB_MIN)),
+      exploded: false, loser: null
+    };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, lastHolder: null, boomShown: false };
+    stage.innerHTML = `
+      <div class="bomb-wrap">
+        <div class="bomb-status sketch" id="bombStatus">폭탄 준비 중…</div>
+      </div>`;
+    const wrap = stage.querySelector(".bomb-wrap");
+    c.statusEl = stage.querySelector("#bombStatus");
+    const { field, map } = buildCharField(wrap, ctx, { size: 50 });
+    field.classList.add("bomb-field");
+    for (const [pid, el] of Object.entries(map)) el.dataset.pid = pid;
+    c.map = map; c.field = field;
+    dock.innerHTML = `<div class="game-note" id="bombNote">💣 폭탄을 든 사람은 다른 친구를 눌러서 넘겨!</div>`;
+    c.noteEl = dock.querySelector("#bombNote");
+
+    // 폭탄 든 사람이 다른 캐릭터를 탭 → 넘김
+    field.addEventListener("pointerdown", e => {
+      const st = ctx.state();
+      if (!st || st.exploded || st.holder !== ctx.uid) return;
+      const charEl = e.target.closest(".char");
+      if (!charEl || !charEl.dataset.pid) return;
+      this._pass(ctx, charEl.dataset.pid);
+    });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  // 넘기기 = game/state 트랜잭션. "현재 홀더가 나"라는 조건 자체가 가드라
+  // 스테일 입력/중복 처리가 원천 차단된다 (별도 nonce 불필요 = 예전 버그 방지).
+  _pass(ctx, tgt) {
+    ctx.txn("game/state", cur => {
+      if (!cur || cur.exploded || cur.holder !== ctx.uid || tgt === ctx.uid) return;
+      if (ctx.now() < (cur.holdSince || 0) + BOMB_HOLD_MIN) return; // 최소 보유시간 미달
+      if (!ctx.players()[tgt]) return; // 나간 사람에게는 못 넘김
+      return Object.assign({}, cur, { holder: tgt, lastPasser: ctx.uid, holdSince: ctx.now() });
+    }).catch(() => {});
+    sfx.swoosh();
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; this._setStatus(n + "…"); cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; gameStartFx(); }
+
+    // 폭탄 위치가 바뀌면 아이콘 이동 + 하이라이트
+    if (c.lastHolder !== st.holder) {
+      const old = c.field.querySelector(".bomb-ico");
+      if (old) old.remove();
+      for (const [pid, el] of Object.entries(c.map)) el.classList.toggle("bomb-has", pid === st.holder && !st.exploded);
+      const hel = c.map[st.holder];
+      if (hel && !st.exploded) {
+        const ic = document.createElement("div");
+        ic.className = "bomb-ico"; ic.textContent = "💣";
+        hel.appendChild(ic);
+      }
+      c.lastHolder = st.holder;
+      if (!st.exploded && c.started) sfx.pop();
+    }
+
+    if (!st.exploded) {
+      const mine = st.holder === ctx.uid;
+      this._setStatus(mine ? "💣 너에게 폭탄!! 빨리 넘겨!!" : `${(ctx.players()[st.holder] || {}).nick || "?"}가 폭탄을 들고 있다!`);
+      if (c.noteEl) c.noteEl.textContent = mine ? "💥 다른 친구를 눌러서 폭탄을 넘겨!!" : "💣 나한테 오면 바로 넘겨야 해…";
+    }
+
+    if (st.exploded && !c.boomShown) {
+      c.boomShown = true;
+      const lel = c.map[st.loser];
+      if (lel) {
+        setFace(lel, "dead"); setMotion(lel, "caught");
+        const ic = lel.querySelector(".bomb-ico"); if (ic) { ic.textContent = "💥"; ic.classList.add("bomb-boom"); }
+        charSay(lel, "펑!!", 2200);
+      }
+      this._setStatus(`💥 ${(ctx.players()[st.loser] || {}).nick || "?"}의 폭탄이 터졌다!`);
+      sfx.boom(); vibrate(400);
+      const wel = st.lastPasser && st.lastPasser !== st.loser ? c.map[st.lastPasser] : null;
+      if (wel) { setFace(wel, "happy"); setMotion(wel, "jump"); charSay(wel, "떠넘기기 성공! 😎", 2200); }
+    }
+  },
+
+  _setStatus(t) { const c = this._c; if (c && c.statusEl && c.statusEl.textContent !== t) c.statusEl.textContent = t; },
+  onState() {}, onInputs() {},
+
+  hostTick(ctx, state) {
+    if (!state || state.exploded || typeof state.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < state.startAt) return;
+    const players = ctx.players();
+    const hp = players[state.holder];
+    // 잠수/퇴장 홀더 → 온라인인 다른 사람에게 자동 이관 (+최소 2.5초 여유)
+    if (!hp || hp.online === false) {
+      const online = Object.keys(players).filter(id => players[id].online !== false && id !== state.holder);
+      if (online.length) {
+        ctx.txn("game/state", cur => {
+          if (!cur || cur.exploded) return;
+          const chp = players[cur.holder];
+          if (chp && chp.online !== false && players[cur.holder]) return; // 이미 복구됨
+          const tgt = online[Math.floor(Math.random() * online.length)];
+          return Object.assign({}, cur, { holder: tgt, holdSince: ctx.now(), fuseEnd: Math.max(cur.fuseEnd, ctx.now() + 2500) });
+        }).catch(() => {});
+      }
+      return;
+    }
+    if (t >= state.fuseEnd) {
+      ctx.txn("game/state", cur => {
+        if (!cur || cur.exploded) return;
+        return Object.assign({}, cur, { exploded: true, loser: cur.holder, boomAt: ctx.now() });
+      }).catch(() => {});
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.exploded ? 2600 : false; },
+  evaluate(ctx, inputs, state) {
+    const loser = state && state.loser;
+    const winner = state && state.lastPasser && state.lastPasser !== loser ? state.lastPasser : null;
+    const outcome = {}, detail = {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (pid === loser) { outcome[pid] = "lose"; detail[pid] = "펑! 폭탄이 터졌다 💥"; }
+      else if (pid === winner) { outcome[pid] = "win"; detail[pid] = "떠넘기기 성공! 😎"; }
+      else { outcome[pid] = "mid"; detail[pid] = "무사히 살았다~ (±0)"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 20. 가위바위보 서바이벌!
+// ═════════════════════════════════════════════
+// 대규모에서 "다 무승부"가 안 나오게: 한 판에 전원 동시 대결이 아니라
+// 매 라운드 1:1 랜덤 매칭 → 지면 탈락 / 이기거나 비기면 생존 → 목표 인원까지 압축.
+const RPS_LEAD = 3000, RPS_PICK = 5000, RPS_REVEAL = 3200, RPS_CAP = 12;
+const RPS_EMO = ["✊", "✋", "✌️"]; // 0 바위 1 보 2 가위
+const RPS_KO = ["바위", "보", "가위"];
+function rpsBeats(a, b) { return (a === 0 && b === 2) || (a === 1 && b === 0) || (a === 2 && b === 1); }
+function rpsPairs(alive) {
+  const s = shuffle(alive), pairs = {};
+  for (let i = 0; i < s.length; i += 2) {
+    if (i + 1 < s.length) { pairs[s[i]] = s[i + 1]; pairs[s[i + 1]] = s[i]; }
+    else pairs[s[i]] = null; // 부전승
+  }
+  return pairs;
+}
+
+const rps = {
+  id: "rps",
+  name: "가위바위보 서바이벌!",
+  tag: "이기거나 비기면 생존! 지면 탈락!",
+
+  duration: () => RPS_LEAD + RPS_CAP * (RPS_PICK + RPS_REVEAL) + 3000,
+  hostSetup(ctx) {
+    const alive = Object.keys(ctx.players());
+    const startAt = ctx.playStart + RPS_LEAD;
+    return {
+      sub: "pick", round: 1, out: {}, pairs: rpsPairs(alive), result: {}, hands: {},
+      startAt, pickEnd: startAt + RPS_PICK, target: Math.max(1, Math.ceil(alive.length * 0.35))
+    };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, roundKey: "", revealKey: "", myPick: -1 };
+    stage.innerHTML = `
+      <div class="rps-wrap">
+        <div class="rps-status sketch" id="rpsStatus">상대 정하는 중…</div>
+        <div class="rps-arena" id="rpsArena">
+          <div class="rps-slot" id="rpsMe"></div>
+          <div class="rps-vs" id="rpsVs">VS</div>
+          <div class="rps-slot" id="rpsOpp"></div>
+        </div>
+        <div class="rps-alive sketch" id="rpsAlive"></div>
+      </div>`;
+    c.statusEl = stage.querySelector("#rpsStatus");
+    c.meEl = stage.querySelector("#rpsMe");
+    c.oppEl = stage.querySelector("#rpsOpp");
+    c.vsEl = stage.querySelector("#rpsVs");
+    c.aliveEl = stage.querySelector("#rpsAlive");
+    dock.innerHTML = `<div class="rps-btns" id="rpsBtns"></div>`;
+    c.btns = dock.querySelector("#rpsBtns");
+    RPS_EMO.forEach((h, i) => {
+      const b = document.createElement("button");
+      b.className = "rps-hand"; b.textContent = h;
+      b.addEventListener("click", () => this._pick(ctx, i));
+      c.btns.appendChild(b);
+    });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+    gameStartFx();
+  },
+
+  _pick(ctx, hand) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || st.sub !== "pick" || (st.out || {})[ctx.uid]) return;
+    if (!st.pairs || st.pairs[ctx.uid] == null) return; // 부전승/미배정
+    if (ctx.now() > st.pickEnd || ctx.now() < st.startAt) return;
+    c.myPick = hand;
+    [...c.btns.children].forEach((b, i) => b.classList.toggle("rps-sel", i === hand));
+    ctx.writeInput({ ["h" + st.round]: hand });
+    sfx.click();
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || !st.startAt) return;
+    this._render(ctx, st);
+    const t = ctx.now();
+    if (t < st.startAt && c.lastCount === -1 || (t < st.startAt)) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; cdTick(); }
+      this._setStatus(`상대와 대결 준비… ${n}`);
+      return;
+    }
+    if (!c.started) c.started = true;
+    if (st.sub === "pick") {
+      const out = (st.out || {})[ctx.uid];
+      const bye = st.pairs && st.pairs[ctx.uid] == null;
+      const remain = Math.max(0, Math.ceil((st.pickEnd - t) / 1000));
+      if (out) this._setStatus("탈락… 남은 사람들을 응원하자! 👀");
+      else if (bye) this._setStatus("부전승! 이번 판은 자동 생존 🎉");
+      else this._setStatus(c.myPick >= 0 ? `${RPS_EMO[c.myPick]} 냈다! 상대는…? (${remain})` : `가위바위보! 골라!! (${remain})`);
+    }
+  },
+
+  _render(ctx, st) {
+    const c = this._c;
+    // 라운드 바뀌면 매칭 화면 새로
+    const rk = "r" + st.round + ":" + st.sub;
+    if (st.sub === "pick" && c.roundKey !== "pick" + st.round) {
+      c.roundKey = "pick" + st.round;
+      c.revealKey = "";
+      c.myPick = -1;
+      [...c.btns.children].forEach(b => b.classList.remove("rps-sel"));
+      const out = (st.out || {})[ctx.uid];
+      const opp = st.pairs ? st.pairs[ctx.uid] : undefined;
+      c.btns.style.visibility = (out || opp == null) ? "hidden" : "";
+      this._slot(c.meEl, ctx, out ? null : ctx.uid, "나");
+      if (out) { this._slotText(c.oppEl, "🙈"); c.vsEl.textContent = ""; }
+      else if (opp == null) { this._slotText(c.oppEl, "🎉"); c.vsEl.textContent = "부전승"; }
+      else { this._slot(c.oppEl, ctx, opp, (ctx.players()[opp] || {}).nick || "?"); c.vsEl.textContent = "VS"; }
+      this._alive(ctx, st);
+    }
+    // 공개
+    if (st.sub === "reveal" && c.revealKey !== "rev" + st.round) {
+      c.revealKey = "rev" + st.round;
+      c.roundKey = "";
+      const hands = st.hands || {}, result = st.result || {};
+      const opp = st.pairs ? st.pairs[ctx.uid] : undefined;
+      const myRes = result[ctx.uid];
+      if (opp != null && hands[ctx.uid] !== undefined) this._slotText(c.meEl, RPS_EMO[hands[ctx.uid]] || "❔");
+      if (opp != null) this._slotText(c.oppEl, hands[opp] !== undefined ? (RPS_EMO[hands[opp]] || "❔") : "❔");
+      c.vsEl.textContent = "VS";
+      if (myRes === "win") { this._setStatus("이겼다! 생존! 🎉"); sfx.correct && sfx.correct(); }
+      else if (myRes === "tie") { this._setStatus("비겼다! 둘 다 생존~ 🤝"); sfx.pop(); }
+      else if (myRes === "bye") { this._setStatus("부전승 생존! 🎉"); sfx.pop(); }
+      else if (myRes === "lose") { this._setStatus("졌다… 탈락 😭"); sfx.wrong && sfx.wrong(); }
+      this._alive(ctx, st);
+    }
+    if (st.sub === "done") this._setStatus("최후의 생존자 결정!! 🏆");
+  },
+
+  _slot(el, ctx, pid, label) {
+    el.innerHTML = "";
+    if (!pid) { el.textContent = "🙈"; return; }
+    const ch = makeChar({ color: ctx.colorOf(pid), nick: (ctx.players()[pid] || {}).nick || label, size: 62 });
+    if (pid === ctx.uid) ch.classList.add("me");
+    el.appendChild(ch);
+  },
+  _slotText(el, txt) { el.innerHTML = ""; el.textContent = txt; },
+  _alive(ctx, st) {
+    const c = this._c;
+    if (!c || !c.aliveEl) return;
+    const total = Object.keys(ctx.players()).length;
+    const aliveN = Object.keys(ctx.players()).filter(id => !(st.out || {})[id]).length;
+    c.aliveEl.textContent = `생존 ${aliveN}명 / ${total}명 · 목표 ${st.target}명`;
+  },
+  _setStatus(t) { const c = this._c; if (c && c.statusEl && c.statusEl.textContent !== t) c.statusEl.textContent = t; },
+  onState() {}, onInputs() {},
+
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    const players = ctx.players();
+    const allIds = Object.keys(players);
+    const out = state.out || {};
+    const alive = allIds.filter(id => !out[id]);
+
+    if (state.sub === "pick" && t >= state.pickEnd) {
+      inputs = inputs || {};
+      const hands = {};
+      for (const id of alive) {
+        const v = inputs[id] && inputs[id]["h" + state.round];
+        hands[id] = (typeof v === "number") ? v : -1;
+      }
+      const pairs = state.pairs || {};
+      const newOut = Object.assign({}, out), result = {}, seen = new Set();
+      for (const id of alive) {
+        const opp = pairs[id];
+        if (opp == null) { result[id] = "bye"; continue; }
+        if (seen.has(id)) continue;
+        seen.add(id); seen.add(opp);
+        const ha = hands[id], hb = hands[opp];
+        const aP = ha >= 0, bP = hb >= 0;
+        if (!aP && !bP) { result[id] = "lose"; result[opp] = "lose"; newOut[id] = 1; newOut[opp] = 1; }
+        else if (!aP) { result[id] = "lose"; result[opp] = "win"; newOut[id] = 1; }
+        else if (!bP) { result[id] = "win"; result[opp] = "lose"; newOut[opp] = 1; }
+        else if (ha === hb) { result[id] = "tie"; result[opp] = "tie"; }
+        else if (rpsBeats(ha, hb)) { result[id] = "win"; result[opp] = "lose"; newOut[opp] = 1; }
+        else { result[id] = "lose"; result[opp] = "win"; newOut[id] = 1; }
+      }
+      // 전원 탈락 방지: 이번 라운드에 아무도 안 남으면 탈락 취소(전원 생존)
+      if (alive.every(id => newOut[id])) {
+        for (const id of alive) { delete newOut[id]; if (result[id] === "lose") result[id] = "tie"; }
+      }
+      ctx.writeState({ sub: "reveal", result, hands, out: newOut, revealAt: t });
+    } else if (state.sub === "reveal" && t >= (state.revealAt || 0) + RPS_REVEAL) {
+      const aliveNow = allIds.filter(id => !(state.out || {})[id]);
+      if (aliveNow.length <= state.target || state.round >= RPS_CAP) {
+        ctx.writeState({ sub: "done" });
+      } else {
+        ctx.writeState({ sub: "pick", round: state.round + 1, pairs: rpsPairs(aliveNow), result: {}, hands: {}, pickEnd: t + RPS_PICK, startAt: t });
+      }
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.sub === "done" ? 1800 : false; },
+  evaluate(ctx, inputs, state) {
+    const out = (state && state.out) || {};
+    const outcome = {}, detail = {};
+    for (const pid of Object.keys(ctx.players())) {
+      if (out[pid]) { outcome[pid] = "lose"; detail[pid] = "가위바위보 탈락… ✊"; }
+      else { outcome[pid] = "win"; detail[pid] = "최후의 생존자! 🏆"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 21. 동상이몽 (다수결 눈치)!
+// ═════════════════════════════════════════════
+const VOTE_LEAD = 3000, VOTE_ASK = 6000, VOTE_REVEAL = 3800, VOTE_Q = 5;
+const VOTE_POOL = [
+  ["🍗 치킨", "🍕 피자"], ["☀️ 여름", "❄️ 겨울"], ["🐶 강아지", "🐱 고양이"],
+  ["🍚 급식", "🏪 매점"], ["부먹", "찍먹"], ["⛰️ 산", "🌊 바다"],
+  ["🍜 짜장", "🍲 짬뽕"], ["🌅 아침형", "🌙 저녁형"], ["물냉면", "비빔냉면"],
+  ["📺 넷플릭스", "▶️ 유튜브"], ["🏠 집콕", "🛝 밖에서 놀기"], ["🍙 삼각김밥", "🍥 컵라면"],
+  ["🌸 봄", "🍂 가을"], ["🍢 떡볶이", "🥟 순대"], ["📱 폰게임", "💻 컴게임"]
+];
+function genVoteQs(seed) {
+  const rng = mulberry32(seed), pool = VOTE_POOL.slice();
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  return pool.slice(0, VOTE_Q);
+}
+
+const vote = {
+  id: "vote",
+  name: "동상이몽!",
+  tag: "다수파에 서면 점수! 친구들 마음을 읽어라",
+
+  duration: () => VOTE_LEAD + VOTE_Q * (VOTE_ASK + VOTE_REVEAL) + 3000,
+  hostSetup(ctx) {
+    const startAt = ctx.playStart + VOTE_LEAD;
+    return { sub: "ask", q: 0, seed: Math.floor(Math.random() * 1e9), startAt, askEnd: startAt + VOTE_ASK };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, qKey: "", revealKey: "", myVote: -1, score: 0 };
+    stage.innerHTML = `
+      <div class="vote-wrap">
+        <div class="vote-top"><span class="sketch hud-chip">눈치 성공: <b id="voteScore">0</b></span><span class="wa-count" id="voteCount"></span></div>
+        <div class="vote-q sketch" id="voteQ">질문 준비 중…</div>
+        <div class="vote-opts" id="voteOpts"></div>
+        <div class="vote-result" id="voteResult"></div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">🤔 남들이 뭘 고를지 눈치껏! 다수파에 서면 +1</div>`;
+    c.qEl = stage.querySelector("#voteQ");
+    c.optsEl = stage.querySelector("#voteOpts");
+    c.resEl = stage.querySelector("#voteResult");
+    c.scoreEl = stage.querySelector("#voteScore");
+    c.countEl = stage.querySelector("#voteCount");
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+    gameStartFx();
+  },
+
+  _qs(ctx) {
+    const c = this._c, st = ctx.state();
+    if (!c._qcache && st && st.seed !== undefined) c._qcache = genVoteQs(st.seed);
+    return c._qcache || [];
+  },
+
+  _renderQ(ctx, st) {
+    const c = this._c;
+    const qs = this._qs(ctx);
+    const pair = qs[st.q];
+    if (!pair) return;
+    c.myVote = -1;
+    c.qEl.innerHTML = `<span class="vote-qn">Q${st.q + 1}/${VOTE_Q}</span> 둘 중 하나!`;
+    c.optsEl.innerHTML = "";
+    c.resEl.textContent = "";
+    c.resEl.className = "vote-result";
+    pair.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.className = "vote-opt vote-opt-" + i;
+      b.innerHTML = `<span class="vote-opt-t"></span><span class="vote-cnt" hidden></span>`;
+      b.querySelector(".vote-opt-t").textContent = opt;
+      b.addEventListener("click", () => this._vote(ctx, i));
+      c.optsEl.appendChild(b);
+    });
+  },
+
+  _vote(ctx, i) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || st.sub !== "ask" || ctx.now() < st.startAt || ctx.now() > st.askEnd) return;
+    c.myVote = i;
+    [...c.optsEl.children].forEach((b, bi) => b.classList.toggle("vote-mine", bi === i));
+    ctx.writeInput({ ["v" + st.q]: i });
+    sfx.click();
+  },
+
+  _reveal(ctx, st) {
+    const c = this._c;
+    const qs = this._qs(ctx);
+    const pair = qs[st.q];
+    if (!pair) return;
+    const inputs = ctx.inputs() || {};
+    let c0 = 0, c1 = 0;
+    for (const pid of Object.keys(ctx.players())) {
+      const v = inputs[pid] && inputs[pid]["v" + st.q];
+      if (v === 0) c0++; else if (v === 1) c1++;
+    }
+    const maj = c0 === c1 ? -1 : (c0 > c1 ? 0 : 1);
+    const cnts = [c0, c1];
+    [...c.optsEl.children].forEach((b, i) => {
+      const cn = b.querySelector(".vote-cnt");
+      cn.hidden = false; cn.textContent = cnts[i] + "표";
+      b.classList.toggle("vote-win", maj === i);
+      b.classList.toggle("vote-lose", maj !== -1 && maj !== i);
+    });
+    playDrumroll();
+    const mine = c.myVote;
+    if (mine < 0) { c.resEl.textContent = "기권… 아무 표도 안 냈어 💤"; c.resEl.className = "vote-result vote-r-lose"; }
+    else if (maj === -1 || mine === maj) {
+      c.score++; if (c.scoreEl) c.scoreEl.textContent = c.score;
+      c.resEl.textContent = maj === -1 ? "동점! 둘 다 인정 +1 🤝" : "다수파 적중! +1 🎉";
+      c.resEl.className = "vote-result vote-r-win";
+      sfx.correct && sfx.correct();
+    } else {
+      c.resEl.textContent = "소수파였다… 아쉽! 😢";
+      c.resEl.className = "vote-result vote-r-lose";
+      sfx.wrong && sfx.wrong();
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || !st.startAt) return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; }
+    if (st.sub === "ask") {
+      if (c.qKey !== "q" + st.q) { c.qKey = "q" + st.q; c.revealKey = ""; this._renderQ(ctx, st); }
+      const remain = Math.max(0, Math.ceil((st.askEnd - t) / 1000));
+      c.countEl.textContent = remain + "초";
+    } else if (st.sub === "reveal") {
+      if (c.revealKey !== "r" + st.q) { c.revealKey = "r" + st.q; c.qKey = ""; this._reveal(ctx, st); c.countEl.textContent = "결과!"; }
+    } else if (st.sub === "done") {
+      c.countEl.textContent = "끝!";
+    }
+  },
+
+  onState() {}, onInputs() {},
+  hostTick(ctx, state) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    if (t < state.startAt) return;
+    if (state.sub === "ask" && t >= state.askEnd) {
+      ctx.writeState({ sub: "reveal", revealAt: t });
+    } else if (state.sub === "reveal" && t >= (state.revealAt || 0) + VOTE_REVEAL) {
+      if (state.q + 1 >= VOTE_Q) ctx.writeState({ sub: "done" });
+      else ctx.writeState({ sub: "ask", q: state.q + 1, askEnd: t + VOTE_ASK });
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.sub === "done" ? 1600 : false; },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const qs = state && state.seed !== undefined ? genVoteQs(state.seed) : [];
+    const players = Object.keys(ctx.players());
+    const score = {};
+    for (const p of players) score[p] = 0;
+    for (let i = 0; i < qs.length; i++) {
+      let c0 = 0, c1 = 0; const votes = {};
+      for (const p of players) { const v = inputs[p] && inputs[p]["v" + i]; if (v === 0) { c0++; votes[p] = 0; } else if (v === 1) { c1++; votes[p] = 1; } }
+      const maj = c0 === c1 ? -1 : (c0 > c1 ? 0 : 1);
+      for (const p of players) if (votes[p] !== undefined && (maj === -1 || votes[p] === maj)) score[p]++;
+    }
+    const played = players.filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "v"))
+      .sort((a, b) => score[b] - score[a]);
+    return tierOutcome(ctx, played, pid => `${score[pid]}번 눈치 성공`, "한 번도 안 냈다… 💤");
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -3953,5 +4497,32 @@ bolt.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt };
+bomb.demo = () => {
+  const d = dmStage("dm-bomb");
+  d.appendChild(dmAt(dmChar(0, "dm-bo-from", 44), "24%", "44%"));
+  d.appendChild(dmAt(dmChar(1, "dm-bo-to", 44), "70%", "44%"));
+  d.appendChild(dmAt(dmProp("dm-bo-bomb", "💣"), "24%", "26%"));
+  d.appendChild(dmAt(dmProp("dm-bo-hint", "터지기 전에 넘겨!"), "50%", "86%"));
+  return d;
+};
+
+rps.demo = () => {
+  const d = dmStage("dm-rps");
+  d.appendChild(dmAt(dmProp("dm-rp-me", "✊"), "28%", "36%"));
+  d.appendChild(dmAt(dmProp("dm-rp-vs", "VS"), "50%", "40%"));
+  d.appendChild(dmAt(dmProp("dm-rp-opp", "✌️"), "72%", "36%"));
+  d.appendChild(dmAt(dmProp("dm-rp-win", "이기면 생존!"), "50%", "82%"));
+  return d;
+};
+
+vote.demo = () => {
+  const d = dmStage("dm-vote");
+  d.appendChild(dmAt(dmProp("dm-vo-a", "🍗"), "30%", "34%"));
+  d.appendChild(dmAt(dmProp("dm-vo-b", "🍕"), "70%", "34%"));
+  d.appendChild(dmAt(dmProp("dm-vo-crown", "👑 다수파 +1"), "30%", "10%"));
+  d.appendChild(dmAt(dmProp("dm-vo-hint", "친구들 마음을 읽어!"), "50%", "84%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote };

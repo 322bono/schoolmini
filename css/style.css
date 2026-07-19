@@ -1169,6 +1169,26 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmBtDodge { 0%, 40% { left: 40%; } 58%, 100% { left: 18%; } }
 .dm-bt-hint { font-size: 0.92rem; color: var(--ink-soft); }
 
+/* 폭탄: 옆 사람에게 넘김 */
+.dm-bo-bomb { font-size: 1.7rem; animation: dmBoPass 2.4s ease-in-out infinite; }
+@keyframes dmBoPass { 0%, 12% { left: 24%; top: 26%; } 40%, 58% { left: 70%; top: 26%; } 82% { left: 70%; top: 26%; opacity: 1; } 88% { opacity: 0.2; transform: translateX(-50%) scale(1.6); } 90%, 100% { left: 24%; top: 26%; opacity: 1; transform: translateX(-50%) scale(1); } }
+.dm-bo-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* 가위바위보: 이기면 생존 */
+.dm-rp-me, .dm-rp-opp { font-size: 2.6rem; }
+.dm-rp-me { animation: dmRpMe 2.4s steps(1,end) infinite; }
+@keyframes dmRpMe { 0%,45% { content: "✊"; } }
+.dm-rp-vs { font-size: 1.2rem; font-weight: 700; color: var(--red); }
+.dm-rp-win { font-size: 1rem; color: var(--green); opacity: 0; animation: dmRpWin 2.4s infinite; }
+@keyframes dmRpWin { 0%,50% { opacity: 0; } 60%,92% { opacity: 1; } 100% { opacity: 0; } }
+
+/* 동상이몽: 다수파 고르기 */
+.dm-vo-a, .dm-vo-b { font-size: 2.2rem; width: 54px; height: 54px; border: 3px solid var(--ink); border-radius: 12px; background: var(--paper-2); display: flex; align-items: center; justify-content: center; }
+.dm-vo-a { animation: dmVoPick 2.6s steps(1,end) infinite; }
+@keyframes dmVoPick { 0%, 55% { background: var(--paper-2); } 60%, 100% { background: #d9f5d0; border-color: var(--green); } }
+.dm-vo-crown { font-size: 0.95rem; color: var(--green); font-weight: 700; opacity: 0; animation: dmRpWin 2.6s infinite; }
+.dm-vo-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
 /* 성대모사: 듣고 → 따라하고 → 채점 */
 .dm-vc-spk { font-size: 2rem; animation: vcPulse 0.9s ease-in-out infinite; }
 .dm-vc-note { font-size: 1.3rem; color: var(--blue); opacity: 0; animation: dmVcNote 1.8s linear infinite; }
@@ -1311,6 +1331,67 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .bolt-arena.bolt-flashwhite::after { content: ""; position: absolute; inset: 0; background: rgba(255,255,255,0.5); }
 .char.bolt-zap { animation: boltZap 0.4s linear; }
 @keyframes boltZap { 0%,100% { filter: none; } 25%,75% { filter: brightness(3) sepia(1) hue-rotate(-20deg); } }
+
+/* ── 폭탄 돌리기! ─────────────────────────── */
+.bomb-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.bomb-status { text-align: center; font-size: 1.3rem; padding: 0.3rem 0; }
+.bomb-field { flex: 1; align-content: center; }
+.bomb-field .char { position: relative; transition: transform 0.15s; }
+.bomb-field .char.bomb-has { transform: scale(1.16); z-index: 3; }
+.bomb-ico {
+  position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+  font-size: 1.7rem; z-index: 4; pointer-events: none;
+  animation: bombShake 0.25s linear infinite;
+}
+@keyframes bombShake { 0%,100% { transform: translateX(-50%) rotate(-12deg); } 50% { transform: translateX(-50%) rotate(12deg); } }
+.bomb-ico.bomb-boom { animation: bombBoom 0.5s ease-out forwards; font-size: 2.4rem; }
+@keyframes bombBoom { 0% { transform: translateX(-50%) scale(1); } 40% { transform: translateX(-50%) scale(1.6); } 100% { transform: translateX(-50%) scale(1.1); opacity: 1; } }
+.bomb-field .char.bomb-has .char-box { animation: bombHold 0.3s ease-in-out infinite; }
+@keyframes bombHold { 50% { transform: translateY(-3px); } }
+
+/* ── 가위바위보 서바이벌! ─────────────────── */
+.rps-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; min-height: 0; padding-top: 0.3rem; }
+.rps-status { font-size: 1.3rem; text-align: center; min-height: 1.5em; }
+.rps-arena { flex: 1; display: flex; align-items: center; justify-content: center; gap: 0.6rem; width: 100%; min-height: 0; }
+.rps-slot {
+  flex: 1; max-width: 40%; min-height: 120px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: clamp(3rem, 16vw, 5rem);
+}
+.rps-vs { font-size: 1.5rem; font-weight: 700; color: var(--red); }
+.rps-alive { font-size: 1.05rem; color: var(--ink-soft); padding-bottom: 0.3rem; }
+.rps-btns { display: flex; gap: 0.7rem; justify-content: center; width: 100%; }
+.rps-hand {
+  font-size: 2.2rem; width: 4rem; height: 4rem; border-radius: 16px;
+  border: 3px solid var(--ink); background: var(--paper-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.rps-hand:active { transform: scale(0.9); }
+.rps-hand.rps-sel { background: var(--hl); box-shadow: 0 0 0 3px var(--red); }
+
+/* ── 동상이몽 (다수결)! ───────────────────── */
+.vote-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; min-height: 0; padding-top: 0.2rem; }
+.vote-top { display: flex; gap: 0.9rem; align-items: center; }
+.vote-q { font-size: 1.35rem; text-align: center; padding: 0.3rem 0.6rem; }
+.vote-qn { color: var(--red); font-weight: 700; }
+.vote-opts { flex: 1; display: flex; gap: 0.8rem; width: 100%; max-width: 620px; align-items: stretch; min-height: 0; }
+.vote-opt {
+  flex: 1; border: 3.5px solid var(--ink); border-radius: var(--r1);
+  background: var(--paper-2); cursor: pointer; font-family: inherit;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem;
+  font-size: clamp(1.4rem, 6vw, 2.2rem); font-weight: 700; padding: 0.6rem; position: relative;
+  transition: transform 0.1s;
+}
+.vote-opt-0 { --vc: #e0472f; }
+.vote-opt-1 { --vc: #3b6fd4; }
+.vote-opt:active { transform: scale(0.97); }
+.vote-opt.vote-mine { box-shadow: inset 0 0 0 4px var(--vc); }
+.vote-opt.vote-win { background: #d9f5d0; border-color: var(--green); }
+.vote-opt.vote-lose { opacity: 0.5; }
+.vote-cnt { font-size: 1.15rem; color: var(--ink-soft); font-weight: 700; }
+.vote-result { min-height: 1.6em; font-size: 1.3rem; font-weight: 700; text-align: center; }
+.vote-r-win { color: var(--green); animation: vcRowPop 0.4s cubic-bezier(0.2,1.8,0.4,1); }
+.vote-r-lose { color: var(--ink-soft); }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {

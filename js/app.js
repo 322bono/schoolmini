@@ -942,7 +942,8 @@ const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
-  voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개"
+  voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
+  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1378,6 +1379,33 @@ function botDrive() {
         const e = t - state.startAt;
         const x = 50 + Math.sin((e / 700) + pid.charCodeAt(pid.length - 1)) * 42;
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { x: Math.round(x * 10) / 10, e: Math.round(e) });
+      }
+    } else if (g === "bomb") {
+      // 봇이 폭탄을 들고 있으면 잠깐 뒤 다른 사람에게 넘김
+      if (state && !state.exploded && state.holder === pid && state.startAt && t > state.startAt) {
+        if (t >= (state.holdSince || 0) + 700 + Math.random() * 900) {
+          const others = Object.keys(playersCache).filter(id => id !== pid);
+          const tgt = others[Math.floor(Math.random() * others.length)];
+          if (tgt) net.dbTxn(`rooms/${room}/game/state`, cur => {
+            if (!cur || cur.exploded || cur.holder !== pid) return;
+            if (t < (cur.holdSince || 0) + 450) return;
+            return Object.assign({}, cur, { holder: tgt, lastPasser: pid, holdSince: t });
+          }).catch(() => {});
+        }
+      }
+    } else if (g === "rps") {
+      if (state && state.sub === "pick" && !(state.out || {})[pid] && state.pairs && state.pairs[pid] != null) {
+        const key = "h" + state.round;
+        if ((!inp || inp[key] === undefined) && Math.random() < 0.4) {
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { [key]: Math.floor(Math.random() * 3) });
+        }
+      }
+    } else if (g === "vote") {
+      if (state && state.sub === "ask" && state.startAt && t > state.startAt) {
+        const key = "v" + state.q;
+        if ((!inp || inp[key] === undefined) && Math.random() < 0.3) {
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { [key]: Math.random() < 0.5 ? 0 : 1 });
+        }
       }
     } else if (g === "mugunghwa") {
       if (!state || state.sub !== "run" || pid === state.tagger) continue;
