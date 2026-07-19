@@ -685,6 +685,46 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .brk-cell.minus { color: var(--red); }
 .brk-total { border-left: 2.4px dashed rgba(51, 49, 46, 0.25); }
 
+/* ── 최종 점수 집계 바 레이스 ───────────────── */
+.race-stage { width: min(600px, 96vw); padding: 0.8rem 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.7rem; }
+.race-head { text-align: center; font-size: clamp(1.25rem, 5.4vw, 1.85rem); font-weight: 700; min-height: 1.4em; }
+.race-head b { color: var(--red); }
+.race-bars { position: relative; width: 100%; }
+.race-bar {
+  position: absolute; left: 0; right: 0; top: 0; height: 38px;
+  display: flex; align-items: center; gap: 0.45em;
+  transition: transform 0.6s cubic-bezier(0.34, 1.2, 0.4, 1);
+  will-change: transform;
+}
+.race-rank { flex: 0 0 auto; width: 1.5em; text-align: center; font-weight: 700; font-size: 1.02rem; color: var(--ink-soft); }
+.race-bar.lead .race-rank { color: var(--red); }
+.race-ava { flex: 0 0 auto; width: 28px; height: 28px; position: relative; }
+.race-mini .char-label { display: none; }
+.race-name { flex: 0 0 4.6em; font-weight: 700; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--pc); }
+.race-track {
+  flex: 1 1 auto; height: 21px; position: relative;
+  background: rgba(51, 49, 46, 0.08); border: 2px solid var(--ink);
+  border-radius: 40px 12px 40px 12px / 12px 40px 12px 40px; overflow: hidden;
+}
+.race-fill { display: block; height: 100%; width: 0; background: var(--pc); border-radius: inherit; transition: width 0.72s cubic-bezier(0.3, 1, 0.4, 1); }
+.race-val { flex: 0 0 auto; width: 2em; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.race-delta { flex: 0 0 auto; width: 2.2em; text-align: left; font-weight: 700; font-size: 1.05rem; opacity: 0; }
+.race-delta.show { animation: dPop 0.42s cubic-bezier(0.2, 1.5, 0.4, 1) forwards; }
+.race-delta.up { color: var(--green); }
+.race-delta.down { color: var(--red); }
+@keyframes dPop {
+  0%   { transform: translateY(8px) scale(0.4); opacity: 0; }
+  60%  { transform: translateY(-3px) scale(1.25); opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.race-bar.champ .race-track { animation: champGlow 0.85s ease-out; }
+.race-bar.champ .race-fill { box-shadow: 0 0 10px var(--pc); }
+@keyframes champGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(255, 225, 77, 0.9); }
+  50%  { box-shadow: 0 0 0 6px rgba(255, 225, 77, 0.6); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 225, 77, 0); }
+}
+
 /* ── 두더지 잡기 ──────────────────────────── */
 .wa-top { display: flex; justify-content: center; gap: 1rem; align-items: center; padding: 0.4rem 0; min-height: 2.5em; }
 .wa-count { font-size: 1.7rem; font-weight: 700; color: var(--red); }

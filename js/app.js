@@ -950,13 +950,20 @@ const GAME_SHORT = {
 // 덜 끝난 클라이언트가 낡은 순위를 계속 보는 "사람마다 우승자 다름" 버그 방지).
 // 팡파레·음악·컨페티만 1회.
 let finalSig = "";
-function renderFinal() {
-  const ids = realIds().sort((a, b) =>
+let raceAnimating = false;
+function rankedFinalIds() {
+  return realIds().sort((a, b) =>
     (playersCache[b].score || 0) - (playersCache[a].score || 0) ||
     (playersCache[a].joined || 0) - (playersCache[b].joined || 0)
   );
+}
+function renderFinal() {
+  const ids = rankedFinalIds();
   if (!ids.length) return;
   const sig = ids.map(pid => pid + ":" + (playersCache[pid].score || 0)).join(",");
+  // 집계 연출 진행 중엔 데이터 갱신에 의한 재렌더를 무시(최신 sig만 기억).
+  // 애니메이션 도중 화면을 갈아엎어 튀는 것 방지.
+  if (finalShown && raceAnimating) { finalSig = sig; return; }
   if (finalShown && sig === finalSig) {
     $("btnAgain").style.display = isHost ? "" : "none";
     return;
@@ -967,9 +974,18 @@ function renderFinal() {
   hideOverlays();
   unmountGame();
 
-  // 우승자 배너 + 춤
+  // 첫 렌더 + 라운드 기록 2개 이상이면 '점수 집계 바 레이스' 연출로 시작
+  const rounds = Object.keys(historyCache || {}).map(Number).filter(n => !isNaN(n));
+  if (firstTime && rounds.length >= 2) { runFinalRace(ids); return; }
+  renderFinalStatic(ids, firstTime);
+}
+
+// 최종 정적 화면(배너·시상대·점수표·순위) — 연출 없이 최종값을 그린다.
+// celebrate=true 일 때만 팡파레·음악·컨페티 (연출을 거치지 않은 즉시 렌더용).
+function renderFinalStatic(ids, celebrate) {
   const champ = ids[0];
   const banner = $("winnerBanner");
+  banner.style.display = "";
   banner.innerHTML = "";
   banner.append("🏆 ");
   const nameB = document.createElement("b");
@@ -979,6 +995,7 @@ function renderFinal() {
   banner.append(" 우승!!");
 
   const podium = $("podiumRow");
+  podium.style.display = "";
   podium.innerHTML = "";
   const top3 = ids.slice(0, 3);
   const order = [top3[1], top3[0], top3[2]].filter(Boolean);
@@ -1013,6 +1030,7 @@ function renderFinal() {
   buildBreakdown(ids);
 
   const list = $("rankList");
+  list.style.display = "";
   list.innerHTML = "";
   ids.forEach((pid, i) => {
     const row = document.createElement("div");
@@ -1023,10 +1041,14 @@ function renderFinal() {
     list.appendChild(row);
   });
   $("btnAgain").style.display = isHost ? "" : "none";
-  if (!firstTime) return; // 데이터 갱신에 의한 재렌더는 연출 없이 내용만 교체
+  if (!celebrate) return;
   sfx.tada();
   setTimeout(() => playPodiumMusic(), 700);
-  // 별 낙서 컨페티
+  finalConfetti();
+}
+
+// 별 낙서 컨페티 (연출/즉시 공용)
+function finalConfetti() {
   let n = 0;
   const conf = setInterval(() => {
     if (n++ > 24 || curScreen !== "scr-final") { clearInterval(conf); return; }
@@ -1038,6 +1060,95 @@ function renderFinal() {
     document.body.appendChild(s);
     setTimeout(() => s.remove(), 4600);
   }, 220);
+}
+
+// 점수 집계 바 레이스 — 0점에서 시작해 라운드별 ±점수가 하나씩 얹히며
+// 막대가 자라고 순위가 재정렬되다가 마지막에 우승자가 확정되는 연출.
+async function runFinalRace(ids) {
+  raceAnimating = true;
+  for (const id of ["winnerBanner", "podiumRow", "brkWrap", "rankList"]) $(id).style.display = "none";
+  $("btnAgain").style.display = "none";
+
+  const stage = $("raceStage"), barsWrap = $("raceBars"), head = $("raceHead");
+  stage.style.display = "";
+  barsWrap.innerHTML = "";
+  head.textContent = "지금까지 점수 집계!";
+
+  const rounds = Object.keys(historyCache || {}).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b);
+  const cum = {}; ids.forEach(p => cum[p] = 0);
+  const barMax = Math.max(1, ...ids.map(p => playersCache[p].score || 0));
+  const rowH = ids.length > 8 ? 34 : 44;
+  const bySeat = ids.slice().sort((a, b) => (playersCache[a].joined || 0) - (playersCache[b].joined || 0));
+
+  const bar = {};
+  bySeat.forEach(pid => {
+    const el = document.createElement("div");
+    el.className = "race-bar";
+    el.style.setProperty("--pc", colorOf(pid));
+    el.style.height = (rowH - 6) + "px";
+    el.innerHTML = `<span class="race-rank">–</span><span class="race-ava"></span><span class="race-name"></span><span class="race-track"><span class="race-fill"></span></span><span class="race-val">0</span><span class="race-delta"></span>`;
+    el.querySelector(".race-name").textContent = playersCache[pid].nick + (pid === UID ? " (나)" : "");
+    const mini = makeChar({ color: colorOf(pid), nick: null, size: 26, motion: "none" });
+    mini.classList.add("race-mini");
+    el.querySelector(".race-ava").appendChild(mini);
+    barsWrap.appendChild(el);
+    bar[pid] = el;
+  });
+  barsWrap.style.height = (ids.length * rowH) + "px";
+
+  const layout = () => {
+    const order = ids.slice().sort((a, b) => (cum[b] - cum[a]) || ((playersCache[a].joined || 0) - (playersCache[b].joined || 0)));
+    order.forEach((pid, i) => {
+      const el = bar[pid];
+      el.style.transform = `translateY(${i * rowH}px)`;
+      el.style.zIndex = ids.length - i;
+      el.querySelector(".race-rank").textContent = i + 1;
+      el.classList.toggle("lead", i === 0);
+      const w = Math.max(cum[pid] > 0 ? 5 : 0, Math.min(100, cum[pid] / barMax * 100));
+      el.querySelector(".race-fill").style.width = w + "%";
+      el.querySelector(".race-val").textContent = cum[pid];
+    });
+  };
+  layout();
+  await sleep(650);
+
+  for (const r of rounds) {
+    if (curScreen !== "scr-final") { raceAnimating = false; return; } // 화면 이탈 시 중단
+    const g = historyCache[r].game;
+    const delta = historyCache[r].delta || {};
+    head.innerHTML = "";
+    const rb = document.createElement("b"); rb.textContent = r + "라운드";
+    head.appendChild(rb); head.append(" · " + (GAME_SHORT[g] || g));
+    let any = false;
+    ids.forEach(pid => {
+      const d = delta[pid];
+      const chip = bar[pid].querySelector(".race-delta");
+      if (d === undefined || d === 0) { chip.textContent = ""; chip.className = "race-delta"; }
+      else { chip.textContent = (d > 0 ? "+" + d : d); chip.className = "race-delta show " + (d > 0 ? "up" : "down"); any = true; }
+      cum[pid] += (d || 0);
+    });
+    if (any) sfx.coin();
+    layout();
+    await sleep(1000);
+    ids.forEach(pid => { bar[pid].querySelector(".race-delta").className = "race-delta"; });
+    await sleep(160);
+  }
+
+  // 피날레 — 우승자 확정
+  if (curScreen !== "scr-final") { raceAnimating = false; return; }
+  head.innerHTML = "";
+  const fb = document.createElement("b"); fb.textContent = "최종 결과!"; head.appendChild(fb);
+  const champ = ids[0];
+  bar[champ].classList.add("champ");
+  bar[champ].querySelector(".race-rank").textContent = "👑";
+  sfx.tada(); vibrate(200);
+  finalConfetti();
+  await sleep(800);
+  playPodiumMusic();
+  await sleep(450);
+
+  raceAnimating = false;
+  renderFinalStatic(ids, false); // 배너·시상대·점수표·순위를 아래에 드러냄(연출/소리 없이)
 }
 
 /** 최종 화면: 라운드×플레이어 ±1 매트릭스 */
