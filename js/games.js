@@ -2470,8 +2470,8 @@ const VOICE_PASS = 70;
 // 채점 요소: [키, 라벨, 만점]
 const VOICE_ELEMS = [["p", "음높이", 30], ["i", "억양", 30], ["r", "리듬", 25], ["l", "길이", 15]];
 
-// 녹음 길이 = 들려준 음원과 똑같은 길이 (공정한 동일-길이 비교)
-function voiceRecDur(clip) { return VOICE_CLIPS[clip].dur; }
+// 녹음 길이 = 들려준 음원 길이 + 약간의 여유(끝이 짤리지 않게). 반응시간 고려한 꼬리 여유.
+function voiceRecDur(clip) { return VOICE_CLIPS[clip].dur + 1000; }
 function voiceSubLens(clip) {
   const dur = VOICE_CLIPS[clip].dur;
   const rec = voiceRecDur(clip);
@@ -4134,7 +4134,7 @@ const vote = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { lastCount: -1, started: false, qKey: "", revealKey: "", myVote: -1, score: 0 };
+    const c = this._c = { lastCount: -1, started: false, qKey: "", revealKey: "", myVote: -1, score: 0, timers: [] };
     stage.innerHTML = `
       <div class="vote-wrap">
         <div class="vote-top"><span class="sketch hud-chip">눈치 성공: <b id="voteScore">0</b></span><span class="wa-count" id="voteCount"></span></div>
@@ -4200,25 +4200,38 @@ const vote = {
     }
     const maj = c0 === c1 ? -1 : (c0 > c1 ? 0 : 1);
     const cnts = [c0, c1];
-    [...c.optsEl.children].forEach((b, i) => {
-      const cn = b.querySelector(".vote-cnt");
-      cn.hidden = false; cn.textContent = cnts[i] + "표";
-      b.classList.toggle("vote-win", maj === i);
-      b.classList.toggle("vote-lose", maj !== -1 && maj !== i);
-    });
-    playDrumroll();
     const mine = c.myVote;
-    if (mine < 0) { c.resEl.textContent = "기권… 아무 표도 안 냈어 💤"; c.resEl.className = "vote-result vote-r-lose"; }
-    else if (maj === -1 || mine === maj) {
-      c.score++; if (c.scoreEl) c.scoreEl.textContent = c.score;
-      c.resEl.textContent = maj === -1 ? "동점! 둘 다 인정 +1 🤝" : "다수파 적중! +1 🎉";
-      c.resEl.className = "vote-result vote-r-win";
-      sfx.correct && sfx.correct();
-    } else {
-      c.resEl.textContent = "소수파였다… 아쉽! 😢";
-      c.resEl.className = "vote-result vote-r-lose";
-      sfx.wrong && sfx.wrong();
-    }
+
+    // 1) 두구두구 먼저 + 긴장감 (아직 표수/승패 숨김)
+    playDrumroll();
+    c.resEl.textContent = "결과는…?!";
+    c.resEl.className = "vote-result";
+    [...c.optsEl.children].forEach(b => b.classList.remove("vote-win", "vote-lose"));
+
+    // 2) 두구두구가 고조된 뒤 공개 + 결과음("예!") — 시작 타이밍 일치
+    c.timers.push(setTimeout(() => {
+      if (this._c !== c) return; // 이미 다음 문제/언마운트
+      [...c.optsEl.children].forEach((b, i) => {
+        const cn = b.querySelector(".vote-cnt");
+        if (cn) { cn.hidden = false; cn.textContent = cnts[i] + "표"; }
+        b.classList.toggle("vote-win", maj === i);
+        b.classList.toggle("vote-lose", maj !== -1 && maj !== i);
+      });
+      if (mine < 0) {
+        c.resEl.textContent = "기권… 아무 표도 안 냈어 💤";
+        c.resEl.className = "vote-result vote-r-lose";
+        sfx.fail && sfx.fail();
+      } else if (maj === -1 || mine === maj) {
+        c.score++; if (c.scoreEl) c.scoreEl.textContent = c.score;
+        c.resEl.textContent = maj === -1 ? "동점! 둘 다 인정 +1 🤝" : "다수파 적중! +1 🎉";
+        c.resEl.className = "vote-result vote-r-win";
+        sfx.correct && sfx.correct();
+      } else {
+        c.resEl.textContent = "소수파였다… 아쉽! 😢";
+        c.resEl.className = "vote-result vote-r-lose";
+        sfx.wrong && sfx.wrong();
+      }
+    }, 1500));
   },
 
   _tick(ctx) {
@@ -4273,7 +4286,7 @@ const vote = {
       .sort((a, b) => score[b] - score[a]);
     return tierOutcome(ctx, played, pid => `${score[pid]}번 눈치 성공`, "한 번도 안 냈다… 💤");
   },
-  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); (c.timers || []).forEach(clearTimeout); this._c = null; }
 };
 
 // ═════════════════════════════════════════════
