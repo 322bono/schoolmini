@@ -383,7 +383,7 @@ const mugunghwa = {
         c.btn.textContent = "잡혔다… 😵";
         return;
       }
-      c.myX = Math.min(100, c.myX + dt * 8);
+      c.myX = Math.min(100, c.myX + dt * 4.2); // 도망자 이동 속도 (대폭 감소: 8 → 4.2)
       const el = c.runnerEls[ctx.uid];
       if (el) {
         el.style.left = (8 + c.myX * 0.72) + "%";
@@ -790,6 +790,7 @@ const choseki = {
   tag: "감으로 N초를 세어라!",
   desc: "목표 시간이 정해지면 시계가 잠깐 보이다가 숨어버려! 🙈<br>마음속으로 초를 세다가 딱 목표 시간에 [멈춰!]를 눌러.<br>가장 정확한 30%가 승리!",
 
+  hideHudTimer: true, // 감으로 세는 게임이라 상단 '남은 초' 표시는 힌트가 됨 → 숨김
   duration: () => 24000,
   hostSetup(ctx) {
     return { target: 5 + Math.floor(Math.random() * 5), startAt: ctx.playStart + 3000 };
@@ -2469,7 +2470,8 @@ const VOICE_PASS = 70;
 // 채점 요소: [키, 라벨, 만점]
 const VOICE_ELEMS = [["p", "음높이", 30], ["i", "억양", 30], ["r", "리듬", 25], ["l", "길이", 15]];
 
-function voiceRecDur(clip) { return Math.max(6000, VOICE_CLIPS[clip].dur + 3000); }
+// 녹음 길이 = 들려준 음원과 똑같은 길이 (공정한 동일-길이 비교)
+function voiceRecDur(clip) { return VOICE_CLIPS[clip].dur; }
 function voiceSubLens(clip) {
   const dur = VOICE_CLIPS[clip].dur;
   const rec = voiceRecDur(clip);

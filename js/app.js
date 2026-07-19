@@ -1237,6 +1237,10 @@ let lastBeepSec = -1;
 setInterval(() => {
   if (!meta || meta.status !== "playing") return;
   const fill = $("hudTimerFill"), sec = $("hudSec"), wrap = $("hudTimerWrap");
+  // 일부 게임(초세기)은 '남은 초'가 힌트가 되므로 상단 타이머를 통째로 숨김
+  const hideTimer = !!(GAMES[meta.curGame] && GAMES[meta.curGame].hideHudTimer);
+  wrap.style.display = hideTimer ? "none" : "";
+  if (hideTimer) { lastBeepSec = -1; return; }
   if (meta.phase === "play" && meta.phaseEnd && meta.playStart) {
     const total = meta.phaseEnd - meta.playStart;
     const remain = Math.max(0, meta.phaseEnd - net.now());
@@ -1385,7 +1389,7 @@ function botDrive() {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { caught: 1 });
         }
       } else {
-        const step = (window.__SM_BOT_STEP || 2.6) + Math.random() * 1.6; // 테스트: __SM_BOT_STEP로 속도 조절
+        const step = (window.__SM_BOT_STEP || 1.4) + Math.random() * 0.9; // 봇 도망자 속도(사람과 맞춰 대폭 감소). 테스트: __SM_BOT_STEP
         const nx = Math.min(100, (v.x || 0) + step);
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`,
           nx >= 100 ? { x: 100, fin: 1 } : { x: Math.round(nx * 10) / 10 });
