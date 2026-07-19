@@ -1189,6 +1189,25 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .dm-vo-crown { font-size: 0.95rem; color: var(--green); font-weight: 700; opacity: 0; animation: dmRpWin 2.6s infinite; }
 .dm-vo-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
+/* 번개 암산: 빠를수록 고득점 */
+.dm-ma-expr { font-size: 1.6rem; font-weight: 700; }
+.dm-ma-bar { width: 130px; height: 14px; border: 2px solid var(--ink); border-radius: 8px; background: linear-gradient(90deg, #b6e3a7 0 50%, #ffe38a 50% 87.5%, #f3a79a 87.5% 100%); }
+.dm-ma-needle { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ink); left: 0; animation: dmMaNeedle 2.6s linear infinite; }
+@keyframes dmMaNeedle { 0% { left: 0; } 70%, 100% { left: 30%; } }
+.dm-ma-ans { font-size: 1.5rem; font-weight: 700; color: var(--green); opacity: 0; animation: dmMaAns 2.6s infinite; }
+@keyframes dmMaAns { 0%, 25% { opacity: 0; } 35%, 90% { opacity: 1; } 100% { opacity: 0; } }
+.dm-ma-hint { font-size: 0.95rem; color: var(--ink-soft); }
+
+/* 스피드 퀴즈: 4지선다 빨리 */
+.dm-qz-q { font-size: 1.4rem; font-weight: 700; }
+.dm-qz-o { width: 46px; height: 34px; border: 2.5px solid var(--ink); border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.1rem; }
+.dm-qz-o0 { background: #e0472f; }
+.dm-qz-o1 { background: #3b6fd4; animation: dmQzPick 2.6s steps(1,end) infinite; }
+@keyframes dmQzPick { 0%, 45% { outline: 0 solid var(--green); } 50%, 100% { outline: 4px solid var(--green); outline-offset: 2px; } }
+.dm-qz-o2 { background: #e0a021; }
+.dm-qz-o3 { background: #3aa055; }
+.dm-qz-hint { font-size: 0.9rem; color: var(--ink-soft); }
+
 /* 성대모사: 듣고 → 따라하고 → 채점 */
 .dm-vc-spk { font-size: 2rem; animation: vcPulse 0.9s ease-in-out infinite; }
 .dm-vc-note { font-size: 1.3rem; color: var(--blue); opacity: 0; animation: dmVcNote 1.8s linear infinite; }
@@ -1392,6 +1411,59 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .vote-result { min-height: 1.6em; font-size: 1.3rem; font-weight: 700; text-align: center; }
 .vote-r-win { color: var(--green); animation: vcRowPop 0.4s cubic-bezier(0.2,1.8,0.4,1); }
 .vote-r-lose { color: var(--ink-soft); }
+
+/* ── 번개 암산! ───────────────────────────── */
+.math-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; min-height: 0; padding-top: 0.2rem; }
+.math-top { display: flex; gap: 0.9rem; align-items: center; }
+.math-qn { font-size: 1.05rem; color: var(--ink-soft); font-weight: 700; }
+.math-expr { font-size: clamp(2.4rem, 11vw, 3.8rem); font-weight: 700; padding: 0.1em 0.6em; text-align: center; }
+.math-expr.math-hard { color: var(--red); }
+.math-bar { position: relative; width: min(320px, 88vw); height: 20px; border: 2.5px solid var(--ink); border-radius: 10px; overflow: hidden; display: flex; }
+.math-seg { height: 100%; }
+.math-seg.math-g { width: 50%; background: #b6e3a7; }   /* <2초 +2 */
+.math-seg.math-y { width: 37.5%; background: #ffe38a; } /* 2~3.5초 +1 */
+.math-seg.math-r { width: 12.5%; background: #f3a79a; } /* 3.5~4초 -1 */
+.math-needle { position: absolute; top: -3px; bottom: -3px; width: 4px; background: var(--ink); left: 0; transition: left 0.08s linear; }
+.math-answer { font-size: 2rem; font-weight: 700; min-height: 1.3em; letter-spacing: 0.08em; color: var(--blue); }
+.math-answer.math-correct { color: var(--green); }
+.math-answer.math-miss { color: var(--red); }
+.math-feedback { min-height: 1.4em; font-size: 1.15rem; font-weight: 700; }
+.math-fb-good { color: var(--green); animation: vcRowPop 0.35s cubic-bezier(0.2,1.8,0.4,1); }
+.math-fb-bad { color: var(--red); }
+.math-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; width: min(300px, 80vw); margin: 0 auto; }
+.math-key {
+  font-size: 1.6rem; font-weight: 700; font-family: inherit;
+  padding: 0.45em 0; border: 3px solid var(--ink); border-radius: 12px;
+  background: var(--paper-2); cursor: pointer;
+}
+.math-key:active { transform: scale(0.92); background: var(--hl); }
+.math-key-fn { font-size: 1.3rem; background: #ece7dd; }
+
+/* ── 스피드 퀴즈! (카훗식) ─────────────────── */
+.quiz-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; min-height: 0; padding-top: 0.3rem; }
+.quiz-count { font-size: 1.1rem; color: var(--ink-soft); font-weight: 700; min-height: 1.4em; }
+.quiz-q { font-size: clamp(1.4rem, 6vw, 2.1rem); font-weight: 700; text-align: center; padding: 0.4em 0.6em; flex: 1; display: flex; align-items: center; justify-content: center; }
+.quiz-info { min-height: 1.5em; font-size: 1.25rem; font-weight: 700; text-align: center; }
+.quiz-i-win { color: var(--green); animation: vcRowPop 0.4s cubic-bezier(0.2,1.8,0.4,1); }
+.quiz-i-lose { color: var(--ink-soft); }
+.quiz-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; max-width: 640px; margin: 0 auto; }
+.quiz-opt {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.7em 0.8em;
+  border: 3px solid var(--ink); border-radius: 12px; cursor: pointer; font-family: inherit;
+  font-size: clamp(1.05rem, 4.2vw, 1.4rem); font-weight: 700; color: #fff;
+  text-align: left; transition: transform 0.1s;
+}
+.quiz-opt:active { transform: scale(0.97); }
+.quiz-opt-0 { background: #e0472f; }
+.quiz-opt-1 { background: #3b6fd4; }
+.quiz-opt-2 { background: #e0a021; }
+.quiz-opt-3 { background: #3aa055; }
+.quiz-shape { font-size: 1.3rem; }
+.quiz-opt-t { flex: 1; }
+.quiz-opt.quiz-mine { box-shadow: 0 0 0 4px var(--ink); }
+.quiz-opt.quiz-dim { opacity: 0.55; }
+.quiz-opt.quiz-right { outline: 4px solid var(--green); outline-offset: 2px; }
+.quiz-opt.quiz-wrong { opacity: 0.4; }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {

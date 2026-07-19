@@ -943,7 +943,7 @@ const GAME_SHORT = {
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
-  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽"
+  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1238,9 +1238,10 @@ let lastBeepSec = -1;
 setInterval(() => {
   if (!meta || meta.status !== "playing") return;
   const fill = $("hudTimerFill"), sec = $("hudSec"), wrap = $("hudTimerWrap");
-  // 일부 게임(초세기)은 '남은 초'가 힌트가 되므로 상단 타이머를 통째로 숨김
+  // 일부 게임(초세기/암산/퀴즈)은 '남은 초'가 힌트가 되므로 상단 타이머 바 + 숫자 통째로 숨김
   const hideTimer = !!(GAMES[meta.curGame] && GAMES[meta.curGame].hideHudTimer);
   wrap.style.display = hideTimer ? "none" : "";
+  sec.style.display = hideTimer ? "none" : "";
   if (hideTimer) { lastBeepSec = -1; return; }
   if (meta.phase === "play" && meta.phaseEnd && meta.playStart) {
     const total = meta.phaseEnd - meta.playStart;
@@ -1405,6 +1406,22 @@ function botDrive() {
         const key = "v" + state.q;
         if ((!inp || inp[key] === undefined) && Math.random() < 0.3) {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { [key]: Math.random() < 0.5 ? 0 : 1 });
+        }
+      }
+    } else if (g === "math") {
+      if (state && state.sub === "ask" && state.qStart && t > state.qStart + 900) {
+        const key = "q" + state.i;
+        // 봇: 뒤 문제일수록 가중치가 커지므로 대충 후반에 점수 폭을 키움
+        const w = state.i < 3 ? 1 : state.i < 6 ? 1.5 : state.i < 8 ? 2 : 2.5;
+        if ((!inp || inp[key] === undefined) && Math.random() < 0.4) {
+          const base = Math.random() < 0.5 ? 2 : Math.random() < 0.7 ? 1 : -1;
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { [key]: Math.round(base * w) });
+        }
+      }
+    } else if (g === "quiz") {
+      if (state && state.sub === "ask" && state.qStart && t > state.qStart + 700 && (!inp || inp.a === undefined)) {
+        if (Math.random() < 0.35) {
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { a: Math.floor(Math.random() * 4), t: Math.round(t - state.qStart) });
         }
       }
     } else if (g === "mugunghwa") {

@@ -4277,6 +4277,388 @@ const vote = {
 };
 
 // ═════════════════════════════════════════════
+// 22. 번개 암산!
+// ═════════════════════════════════════════════
+const MATH_LEAD = 3000, MATH_INPUT = 4000, MATH_REVEAL = 1300, MATH_Q = 10;
+// 밴드: <2초 +2 / 2~3.5초 +1 / 3.5~4초 -1 · 문제별 가중치(w)로 곱함
+function mathBand(elapsed) { return elapsed < 2000 ? 2 : elapsed < 3500 ? 1 : -1; }
+function genMath(seed) {
+  const rng = mulberry32(seed);
+  const ri = (lo, hi) => lo + Math.floor(rng() * (hi - lo + 1));
+  const qs = [];
+  for (let i = 0; i < MATH_Q; i++) {
+    let a, b, op, ans, w;
+    if (i < 3) { // 쉬움: 한 자리 +/-
+      if (rng() < 0.5) { op = "+"; a = ri(2, 9); b = ri(2, 9); ans = a + b; }
+      else { op = "−"; a = ri(4, 9); b = ri(1, a - 1); ans = a - b; }
+      w = 1;
+    } else if (i < 6) { // 보통: 두 자리 +/-
+      if (rng() < 0.5) { op = "+"; a = ri(11, 49); b = ri(11, 49); ans = a + b; }
+      else { op = "−"; a = ri(30, 89); b = ri(11, a - 10); ans = a - b; }
+      w = 1.5;
+    } else if (i < 8) { // 어려움: 한 자리 × 한 자리
+      op = "×"; a = ri(3, 9); b = ri(3, 9); ans = a * b; w = 2;
+    } else { // 최고난도: 두 자리 × 한 자리
+      op = "×"; a = ri(11, 19); b = ri(3, 8); ans = a * b; w = 2.5;
+    }
+    qs.push({ a, b, op, ans, w });
+  }
+  return qs;
+}
+
+const math = {
+  id: "math",
+  name: "번개 암산!",
+  tag: "빠를수록 고득점! 느리면 감점!",
+
+  stampOnTimeout: false,
+  hideHudTimer: true, // 문제별 타이밍 바가 따로 있어 상단 라운드 타이머는 숨김
+  duration: () => MATH_LEAD + MATH_Q * (MATH_INPUT + MATH_REVEAL) + 2500,
+  hostSetup(ctx) {
+    const startAt = ctx.playStart + MATH_LEAD;
+    return { sub: "ask", i: 0, seed: Math.floor(Math.random() * 1e9), startAt, qStart: startAt, qEnd: startAt + MATH_INPUT };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, qKey: "", revealKey: "", typed: "", answered: false, myScores: {}, total: 0 };
+    stage.innerHTML = `
+      <div class="math-wrap">
+        <div class="math-top">
+          <span class="sketch hud-chip">총점: <b id="mathScore">0</b></span>
+          <span class="math-qn" id="mathQn"></span>
+        </div>
+        <div class="math-expr sketch" id="mathExpr">준비…</div>
+        <div class="math-bar" id="mathBar">
+          <div class="math-seg math-g"></div><div class="math-seg math-y"></div><div class="math-seg math-r"></div>
+          <div class="math-needle" id="mathNeedle"></div>
+        </div>
+        <div class="math-answer" id="mathAns"></div>
+        <div class="math-feedback" id="mathFb"></div>
+      </div>`;
+    c.scoreEl = stage.querySelector("#mathScore");
+    c.qnEl = stage.querySelector("#mathQn");
+    c.exprEl = stage.querySelector("#mathExpr");
+    c.barEl = stage.querySelector("#mathBar");
+    c.needle = stage.querySelector("#mathNeedle");
+    c.ansEl = stage.querySelector("#mathAns");
+    c.fbEl = stage.querySelector("#mathFb");
+    // 숫자 키패드
+    dock.innerHTML = `<div class="math-pad" id="mathPad"></div>`;
+    const pad = dock.querySelector("#mathPad");
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "⌫"].forEach(k => {
+      const b = document.createElement("button");
+      b.className = "math-key" + (k === "C" || k === "⌫" ? " math-key-fn" : "");
+      b.textContent = k;
+      b.addEventListener("click", () => this._key(ctx, k));
+      pad.appendChild(b);
+    });
+    c.pad = pad;
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+    gameStartFx();
+  },
+
+  _qs(ctx) {
+    const c = this._c, st = ctx.state();
+    if (!c._cache && st && st.seed !== undefined) c._cache = genMath(st.seed);
+    return c._cache || [];
+  },
+
+  _key(ctx, k) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || st.sub !== "ask" || c.answered) return;
+    if (ctx.now() < st.qStart || ctx.now() > st.qEnd) return;
+    if (k === "C") c.typed = "";
+    else if (k === "⌫") c.typed = c.typed.slice(0, -1);
+    else if (c.typed.length < 4) c.typed += k;
+    c.ansEl.textContent = c.typed || "?";
+    sfx.click();
+    const q = this._qs(ctx)[st.i];
+    if (q && c.typed !== "" && Number(c.typed) === q.ans) this._submit(ctx, st, q);
+  },
+
+  _submit(ctx, st, q) {
+    const c = this._c;
+    c.answered = true;
+    const elapsed = ctx.now() - st.qStart;
+    const score = Math.round(mathBand(elapsed) * q.w);
+    c.myScores[st.i] = score;
+    c.total += score;
+    c.scoreEl.textContent = c.total;
+    ctx.writeInput({ ["q" + st.i]: score });
+    c.ansEl.classList.add("math-correct");
+    c.fbEl.textContent = `정답! ${(elapsed / 1000).toFixed(2)}초 → ${score > 0 ? "+" + score : score}점`;
+    c.fbEl.className = "math-feedback " + (score > 0 ? "math-fb-good" : "math-fb-bad");
+    (score > 0 ? sfx.correct : sfx.buzz)();
+    if (score > 0) vibrate(60);
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.exprEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) c.started = true;
+    const qs = this._qs(ctx);
+    if (st.sub === "ask") {
+      if (c.qKey !== "q" + st.i) {
+        c.qKey = "q" + st.i; c.revealKey = "";
+        c.typed = ""; c.answered = false;
+        const q = qs[st.i];
+        c.qnEl.textContent = `${st.i + 1}/${MATH_Q}` + (q && q.w >= 2 ? " 🔥" : q && q.w > 1 ? " ⚡" : "");
+        c.exprEl.textContent = q ? `${q.a} ${q.op} ${q.b} = ?` : "?";
+        c.exprEl.className = "math-expr sketch" + (q && q.w >= 2 ? " math-hard" : "");
+        c.ansEl.textContent = "?"; c.ansEl.className = "math-answer";
+        c.fbEl.textContent = ""; c.fbEl.className = "math-feedback";
+        c.pad.style.visibility = "";
+      }
+      // 타이밍 바 바늘
+      const el = Math.min(MATH_INPUT, t - st.qStart);
+      c.needle.style.left = (el / MATH_INPUT * 100) + "%";
+      if (!c.answered) c.needle.style.opacity = 1;
+    } else if (st.sub === "reveal") {
+      if (c.revealKey !== "r" + st.i) {
+        c.revealKey = "r" + st.i; c.qKey = "";
+        c.needle.style.opacity = 0;
+        c.pad.style.visibility = "hidden";
+        const q = qs[st.i];
+        c.exprEl.textContent = q ? `${q.a} ${q.op} ${q.b} = ${q.ans}` : "?";
+        if (!c.answered) {
+          // 시간초과 → 감점
+          const pen = Math.round(-1 * (q ? q.w : 1));
+          c.myScores[st.i] = pen; c.total += pen; c.scoreEl.textContent = c.total;
+          ctx.writeInput({ ["q" + st.i]: pen });
+          c.fbEl.textContent = `시간초과… ${pen}점`;
+          c.fbEl.className = "math-feedback math-fb-bad";
+          c.ansEl.textContent = "✕"; c.ansEl.className = "math-answer math-miss";
+        }
+      }
+    } else if (st.sub === "done") {
+      c.exprEl.textContent = `끝! 내 총점 ${c.total}점`;
+      c.pad.style.visibility = "hidden";
+    }
+  },
+
+  onState() {}, onInputs() {},
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    if (t < state.startAt) return;
+    if (state.sub === "ask") {
+      const players = ctx.players();
+      const online = Object.keys(players).filter(id => players[id].online !== false);
+      const allDone = online.length > 0 && online.every(id => inputs && inputs[id] && inputs[id]["q" + state.i] !== undefined);
+      if (allDone || t >= state.qEnd) ctx.writeState({ sub: "reveal", revealAt: t });
+    } else if (state.sub === "reveal" && t >= (state.revealAt || 0) + MATH_REVEAL) {
+      if (state.i + 1 >= MATH_Q) ctx.writeState({ sub: "done" });
+      else ctx.writeState({ sub: "ask", i: state.i + 1, qStart: t, qEnd: t + MATH_INPUT });
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.sub === "done" ? 1500 : false; },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const qs = state && state.seed !== undefined ? genMath(state.seed) : [];
+    const players = Object.keys(ctx.players());
+    const score = {};
+    for (const p of players) {
+      let s = 0;
+      const inp = inputs[p] || {};
+      for (let i = 0; i < qs.length; i++) {
+        s += (inp["q" + i] !== undefined) ? inp["q" + i] : Math.round(-1 * qs[i].w); // 미응답 = 시간초과 감점
+      }
+      score[p] = s;
+    }
+    const played = players.filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "q"))
+      .sort((a, b) => score[b] - score[a]);
+    return tierOutcome(ctx, played, pid => score[pid] + "점", "한 문제도 안 풀었다… 💤");
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 23. 상식 스피드 퀴즈! (카훗식 단판)
+// ═════════════════════════════════════════════
+const QUIZ_LEAD = 3000, QUIZ_ANSWER = 8000, QUIZ_REVEAL = 4800;
+const QUIZ_SHAPE = ["▲", "◆", "●", "■"];
+const QUIZ_POOL = [
+  { q: "세종대왕이 만든 것은?", o: ["한글", "거북선", "측우기", "화약"], a: 0 },
+  { q: "태양계에서 가장 큰 행성은?", o: ["지구", "목성", "화성", "금성"], a: 1 },
+  { q: "물의 화학 기호는?", o: ["CO₂", "O₂", "H₂O", "NaCl"], a: 2 },
+  { q: "무지개는 몇 가지 색?", o: ["5", "6", "7", "8"], a: 2 },
+  { q: "대한민국의 수도는?", o: ["부산", "서울", "인천", "대구"], a: 1 },
+  { q: "삼각형 세 각의 합은?", o: ["90도", "180도", "270도", "360도"], a: 1 },
+  { q: "거미의 다리는 몇 개?", o: ["6개", "8개", "10개", "4개"], a: 1 },
+  { q: "얼음이 녹으면?", o: ["수증기", "물", "눈", "그대로"], a: 1 },
+  { q: "축구 한 팀 선수는?", o: ["9명", "10명", "11명", "12명"], a: 2 },
+  { q: "7 × 8 은?", o: ["54", "56", "48", "64"], a: 1 },
+  { q: "펭귄이 사는 곳은?", o: ["사막", "남극", "정글", "초원"], a: 1 },
+  { q: "백설공주의 난쟁이는 몇 명?", o: ["5명", "6명", "7명", "8명"], a: 2 },
+  { q: "한글날은 몇 월?", o: ["10월", "8월", "3월", "5월"], a: 0 },
+  { q: "빛의 삼원색이 아닌 것은?", o: ["빨강", "초록", "파랑", "노랑"], a: 3 },
+  { q: "1분은 몇 초?", o: ["50초", "60초", "100초", "90초"], a: 1 },
+  { q: "한국의 국화(나라꽃)는?", o: ["장미", "무궁화", "벚꽃", "튤립"], a: 1 }
+];
+
+const quiz = {
+  id: "quiz",
+  name: "스피드 퀴즈!",
+  tag: "정답 + 빠르기! 느린 정답은 소용없어",
+
+  stampOnTimeout: false,
+  hideHudTimer: true,
+  duration: () => QUIZ_LEAD + QUIZ_ANSWER + QUIZ_REVEAL + 2500,
+  hostSetup(ctx) {
+    const startAt = ctx.playStart + QUIZ_LEAD;
+    return { sub: "ask", qi: Math.floor(Math.random() * QUIZ_POOL.length), startAt, qStart: startAt, answerEnd: startAt + QUIZ_ANSWER };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, phase: "", answered: false, myPick: -1 };
+    stage.innerHTML = `
+      <div class="quiz-wrap">
+        <div class="quiz-count" id="quizCount"></div>
+        <div class="quiz-q sketch" id="quizQ">준비…</div>
+        <div class="quiz-info" id="quizInfo"></div>
+      </div>`;
+    c.countEl = stage.querySelector("#quizCount");
+    c.qEl = stage.querySelector("#quizQ");
+    c.infoEl = stage.querySelector("#quizInfo");
+    dock.innerHTML = `<div class="quiz-opts" id="quizOpts"></div>`;
+    c.optsEl = dock.querySelector("#quizOpts");
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+    gameStartFx();
+  },
+
+  _renderQ(ctx, st) {
+    const c = this._c;
+    const Q = QUIZ_POOL[st.qi];
+    if (!Q) return;
+    c.qEl.textContent = Q.q;
+    c.optsEl.innerHTML = "";
+    Q.o.forEach((opt, i) => {
+      const b = document.createElement("button");
+      b.className = "quiz-opt quiz-opt-" + i;
+      b.innerHTML = `<span class="quiz-shape">${QUIZ_SHAPE[i]}</span><span class="quiz-opt-t"></span>`;
+      b.querySelector(".quiz-opt-t").textContent = opt;
+      b.addEventListener("click", () => this._pick(ctx, st, i));
+      c.optsEl.appendChild(b);
+    });
+  },
+
+  _pick(ctx, st, i) {
+    const c = this._c;
+    if (!c || c.answered || ctx.now() < st.qStart || ctx.now() > st.answerEnd) return;
+    c.answered = true;
+    c.myPick = i;
+    const t = ctx.now() - st.qStart;
+    [...c.optsEl.children].forEach((b, bi) => { b.classList.toggle("quiz-mine", bi === i); if (bi !== i) b.classList.add("quiz-dim"); });
+    ctx.writeInput({ a: i, t: Math.round(t) });
+    sfx.pop();
+    c.infoEl.textContent = "답 제출! 결과를 기다려…";
+  },
+
+  _reveal(ctx, st) {
+    const c = this._c;
+    const Q = QUIZ_POOL[st.qi];
+    if (!Q) return;
+    const inputs = ctx.inputs() || {};
+    // 정답자 속도순 정렬 → 빠른 상위 50%가 승자
+    const correct = Object.keys(ctx.players())
+      .filter(p => inputs[p] && inputs[p].a === Q.a && typeof inputs[p].t === "number")
+      .sort((a, b) => inputs[a].t - inputs[b].t);
+    const winCut = Math.ceil(correct.length / 2);
+    const winners = new Set(correct.slice(0, winCut));
+    [...c.optsEl.children].forEach((b, i) => {
+      b.classList.remove("quiz-dim");
+      b.classList.toggle("quiz-right", i === Q.a);
+      b.classList.toggle("quiz-wrong", i !== Q.a);
+    });
+    const iAmCorrect = c.myPick === Q.a;
+    const iWin = winners.has(ctx.uid);
+    let myRank = correct.indexOf(ctx.uid);
+    if (iWin) {
+      c.infoEl.textContent = `정답 + 빠름! ${myRank + 1}등 → +1 🎉`;
+      c.infoEl.className = "quiz-info quiz-i-win"; sfx.tada();
+    } else if (iAmCorrect) {
+      c.infoEl.textContent = `정답이지만 느렸다… (${myRank + 1}등) -1 😢`;
+      c.infoEl.className = "quiz-info quiz-i-lose"; sfx.fail();
+    } else {
+      c.infoEl.textContent = `땡! 정답은 ${QUIZ_SHAPE[Q.a]} ${Q.o[Q.a]} -1`;
+      c.infoEl.className = "quiz-info quiz-i-lose"; sfx.fail();
+    }
+    c.countEl.textContent = `정답 ${correct.length}명 · 상위 ${winCut}명만 득점!`;
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.qEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) c.started = true;
+    if (st.sub === "ask") {
+      if (c.phase !== "ask") { c.phase = "ask"; this._renderQ(ctx, st); }
+      const remain = Math.max(0, Math.ceil((st.answerEnd - t) / 1000));
+      const answered = Object.keys(ctx.inputs() || {}).filter(p => (ctx.inputs()[p] || {}).a !== undefined).length;
+      c.countEl.textContent = `⏱ ${remain}초 · ${answered}명 응답`;
+    } else if (st.sub === "reveal") {
+      if (c.phase !== "reveal") { c.phase = "reveal"; this._reveal(ctx, st); }
+    }
+  },
+
+  onState() {}, onInputs() {},
+  hostTick(ctx, state, inputs) {
+    if (!state || !state.sub) return;
+    const t = ctx.now();
+    if (t < state.startAt) return;
+    if (state.sub === "ask") {
+      const players = ctx.players();
+      const online = Object.keys(players).filter(id => players[id].online !== false);
+      const allDone = online.length > 0 && online.every(id => inputs && inputs[id] && inputs[id].a !== undefined);
+      if (allDone || t >= state.answerEnd) ctx.writeState({ sub: "reveal", revealAt: t });
+    } else if (state.sub === "reveal" && t >= (state.revealAt || 0) + QUIZ_REVEAL) {
+      ctx.writeState({ sub: "done" });
+    }
+  },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.sub === "done" ? 1400 : false; },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const Q = state && state.qi !== undefined ? QUIZ_POOL[state.qi] : null;
+    const players = Object.keys(ctx.players());
+    const outcome = {}, detail = {};
+    const ans = Q ? Q.a : -1;
+    const correct = players
+      .filter(p => inputs[p] && inputs[p].a === ans && typeof inputs[p].t === "number")
+      .sort((a, b) => inputs[a].t - inputs[b].t);
+    const winCut = Math.ceil(correct.length / 2); // 정답자 상위 50%(빠른 순)만 +1
+    correct.forEach((pid, idx) => {
+      if (idx < winCut) { outcome[pid] = "win"; detail[pid] = `정답 ${idx + 1}등! ⚡ +1`; }
+      else { outcome[pid] = "lose"; detail[pid] = `정답이지만 느렸다 (${idx + 1}등)`; }
+    });
+    for (const pid of players) {
+      if (outcome[pid] === undefined) {
+        outcome[pid] = "lose";
+        detail[pid] = inputs[pid] && inputs[pid].a !== undefined ? "오답… 😢" : "시간초과… 💤";
+      }
+    }
+    return { outcome, detail };
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -4524,5 +4906,27 @@ vote.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote };
+math.demo = () => {
+  const d = dmStage("dm-math");
+  d.appendChild(dmAt(dmProp("dm-ma-expr", "7 × 8 = ?"), "50%", "16%"));
+  const bar = dmAt(dmProp("dm-ma-bar"), "50%", "48%");
+  bar.appendChild(dmProp("dm-ma-needle"));
+  d.appendChild(bar);
+  d.appendChild(dmAt(dmProp("dm-ma-ans", "56"), "50%", "64%"));
+  d.appendChild(dmAt(dmProp("dm-ma-hint", "빠를수록 고득점!"), "50%", "86%"));
+  return d;
+};
+
+quiz.demo = () => {
+  const d = dmStage("dm-quiz");
+  d.appendChild(dmAt(dmProp("dm-qz-q", "수도는?"), "50%", "8%"));
+  d.appendChild(dmAt(dmProp("dm-qz-o dm-qz-o0", "▲"), "30%", "40%"));
+  d.appendChild(dmAt(dmProp("dm-qz-o dm-qz-o1", "◆"), "70%", "40%"));
+  d.appendChild(dmAt(dmProp("dm-qz-o dm-qz-o2", "●"), "30%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-qz-o dm-qz-o3", "■"), "70%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-qz-hint", "빨리 맞힌 상위권만 +1!"), "50%", "88%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz };
