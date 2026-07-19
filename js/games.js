@@ -77,15 +77,28 @@ function mulberry32(seed) {
 /**
  * 순위형 게임 공통 3단계 점수:
  * 상위 30% → win(+1), 31~60% → mid(0), 나머지·미참여 → lose(-1)
+ * scoreOf가 주어지면 경계에 걸친 "동점자"는 위 티어에 유도리 있게 포함 (동점자도 +1).
  * @param ctx
  * @param ranked 잘한 순서대로 정렬된 참가자 uid 배열
  * @param detailOf uid → 표시 문구
  * @param notPlayedText 미참여자 문구
+ * @param scoreOf (선택) uid → 순위 점수(높을수록 상위). 동점 유도리에 사용
  */
-function tierOutcome(ctx, ranked, detailOf, notPlayedText) {
+function tierOutcome(ctx, ranked, detailOf, notPlayedText, scoreOf) {
   const players = Object.keys(ctx.players());
-  const winCut = Math.max(1, Math.ceil(players.length * 0.3));
-  const midCut = Math.ceil(players.length * 0.6);
+  const n = players.length;
+  let winCut = Math.max(1, Math.ceil(n * 0.3));
+  let midCut = Math.ceil(n * 0.6);
+  // 동점자 유도리: 경계 바로 아래가 같은 점수면 같은 티어로 끌어올림.
+  // (상위 30% 커트라인에 동점이 몰리면 그 동점자들도 +1). 과도한 확장 방지 상한 있음.
+  if (typeof scoreOf === "function") {
+    const s = pid => scoreOf(pid);
+    const winMax = Math.max(1, Math.ceil(n * 0.5));   // win은 최대 50%까지만
+    const midMax = Math.max(1, Math.ceil(n * 0.8));
+    while (winCut < ranked.length && winCut < winMax && s(ranked[winCut]) === s(ranked[winCut - 1])) winCut++;
+    if (midCut < winCut) midCut = winCut;
+    while (midCut < ranked.length && midCut < midMax && s(ranked[midCut]) === s(ranked[midCut - 1])) midCut++;
+  }
   const outcome = {}, detail = {};
   ranked.forEach((pid, i) => {
     outcome[pid] = i < winCut ? "win" : i < midCut ? "mid" : "lose";
@@ -765,7 +778,7 @@ const grab = {
     const valid = players
       .filter(pid => inputs[pid] && inputs[pid].dt >= 0)
       .sort((a, b) => inputs[a].dt - inputs[b].dt);
-    const res = tierOutcome(ctx, valid, pid => (inputs[pid].dt / 1000).toFixed(3) + "초", "멍때렸다… 💤");
+    const res = tierOutcome(ctx, valid, pid => (inputs[pid].dt / 1000).toFixed(3) + "초", "멍때렸다… 💤", pid => -inputs[pid].dt);
     for (const pid of players) {
       if (inputs[pid] && inputs[pid].dt < 0) { res.outcome[pid] = "lose"; res.detail[pid] = "부정출발!"; }
     }
@@ -898,7 +911,7 @@ const choseki = {
     const valid = players
       .filter(pid => inputs[pid] && typeof inputs[pid].e === "number")
       .sort((a, b) => Math.abs(inputs[a].e - targetMs) - Math.abs(inputs[b].e - targetMs));
-    return tierOutcome(ctx, valid, pid => (inputs[pid].e / 1000).toFixed(2) + "초", "안 눌렀다… 💤");
+    return tierOutcome(ctx, valid, pid => (inputs[pid].e / 1000).toFixed(2) + "초", "안 눌렀다… 💤", pid => -Math.abs(inputs[pid].e - targetMs));
   },
   unmount() {
     const c = this._c;
@@ -1075,7 +1088,7 @@ const whack = {
     const score = whackScores(ctx, state);
     const players = Object.keys(ctx.players());
     const ranked = players.slice().sort((a, b) => score[b] - score[a]);
-    return tierOutcome(ctx, ranked, pid => score[pid] + "점", "멍때렸다… 💤");
+    return tierOutcome(ctx, ranked, pid => score[pid] + "점", "멍때렸다… 💤", pid => score[pid]);
   },
   unmount() {
     const c = this._c;
@@ -1276,7 +1289,7 @@ const typing = {
     const participated = players.filter(p =>
       (inputs[p] && inputs[p].pen !== undefined) || Object.values(claims).some(cl => cl.u === p)
     ).sort((a, b) => score[b] - score[a]);
-    return tierOutcome(ctx, participated, pid => score[pid] + "점", "멍때렸다… 💤");
+    return tierOutcome(ctx, participated, pid => score[pid] + "점", "멍때렸다… 💤", pid => score[pid]);
   },
   unmount() {
     const c = this._c;
@@ -1411,7 +1424,7 @@ const mash = {
     const players = Object.keys(ctx.players());
     const played = players.filter(p => inputs[p] && typeof inputs[p].n === "number" && inputs[p].n > 0)
       .sort((a, b) => inputs[b].n - inputs[a].n);
-    return tierOutcome(ctx, played, pid => inputs[pid].n + "번!", "안 눌렀다… 💤");
+    return tierOutcome(ctx, played, pid => inputs[pid].n + "번!", "안 눌렀다… 💤", pid => inputs[pid].n);
   },
   unmount() {
     const c = this._c;
@@ -2183,7 +2196,8 @@ const avg = {
       Math.abs(inputs[a].v - avgV) - Math.abs(inputs[b].v - avgV));
     return tierOutcome(ctx, ranked,
       pid => `${inputs[pid].v} (평균 ${avgV.toFixed(1)})`,
-      "안 냈다… 💤");
+      "안 냈다… 💤",
+      pid => -Math.abs(inputs[pid].v - avgV));
   },
   unmount() {
     const c = this._c;
@@ -2446,7 +2460,7 @@ const spin = {
     const players = Object.keys(ctx.players());
     const played = players.filter(p => inputs[p] && typeof inputs[p].r === "number" && inputs[p].r > 0)
       .sort((a, b) => inputs[b].r - inputs[a].r);
-    return tierOutcome(ctx, played, pid => inputs[pid].r + " RPM", "안 돌렸다… 💤");
+    return tierOutcome(ctx, played, pid => inputs[pid].r + " RPM", "안 돌렸다… 💤", pid => inputs[pid].r);
   },
   unmount() {
     const c = this._c;
@@ -3251,7 +3265,7 @@ const omr = {
     const played = players
       .filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "a" && typeof inputs[p][k] === "number"))
       .sort((a, b) => score[b] - score[a]);
-    return tierOutcome(ctx, played, pid => score[pid] + "점", "백지 제출… 💤");
+    return tierOutcome(ctx, played, pid => score[pid] + "점", "백지 제출… 💤", pid => score[pid]);
   },
   unmount() {
     const c = this._c;
@@ -3773,18 +3787,35 @@ const bomb = {
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { lastCount: -1, started: false, lastKey: "", boomKey: 0 };
-    stage.innerHTML = `<div class="bomb-wrap"><div class="bomb-status sketch" id="bombStatus">폭탄 준비 중…</div></div>`;
-    const wrap = stage.querySelector(".bomb-wrap");
+    const c = this._c = { lastCount: -1, started: false, lastKey: "", boomKey: 0, lastProb: -1 };
+    stage.innerHTML = `
+      <div class="bomb-wrap">
+        <div class="bomb-status sketch" id="bombStatus">폭탄 준비 중…</div>
+        <div class="bomb-ring" id="bombRing">
+          <div class="bomb-center" id="bombCenter">
+            <div class="bomb-prob-lbl">터질 확률</div>
+            <div class="bomb-prob" id="bombProb">–</div>
+          </div>
+        </div>
+      </div>`;
     c.statusEl = stage.querySelector("#bombStatus");
-    const { field, map } = buildCharField(wrap, ctx, { size: 48 });
-    field.classList.add("bomb-field");
-    for (const [pid, el] of Object.entries(map)) el.dataset.pid = pid;
-    c.map = map; c.field = field;
+    c.ring = stage.querySelector("#bombRing");
+    c.centerEl = stage.querySelector("#bombCenter");
+    c.probEl = stage.querySelector("#bombProb");
+    // 플레이어를 원형으로 배치
+    c.map = {};
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 46 });
+      if (pid === ctx.uid) { el.classList.add("me"); const mk = document.createElement("div"); mk.className = "you-mark"; mk.textContent = "▼ 나"; el.appendChild(mk); }
+      el.dataset.pid = pid;
+      c.map[pid] = el;
+      c.ring.appendChild(el);
+    }
+    c.cleanupWin = circleLayout(c.ring, c.map);
     dock.innerHTML = `<div class="game-note" id="bombNote">💣 폭탄을 든 사람은 다른 친구를 눌러서 넘겨!</div>`;
     c.noteEl = dock.querySelector("#bombNote");
 
-    field.addEventListener("pointerdown", e => {
+    c.ring.addEventListener("pointerdown", e => {
       const st = ctx.state();
       if (!st || st.sub !== "live" || st.holder !== ctx.uid) return;
       const charEl = e.target.closest(".char");
@@ -3835,7 +3866,7 @@ const bomb = {
     // 폭탄 아이콘 위치 (live=홀더에 💣, boom=loser에 💥)
     const key = st.sub + ":" + st.holder + ":" + st.bombNo + ":" + (st.loser || "");
     if (c.lastKey !== key) {
-      const old = c.field.querySelector(".bomb-ico"); if (old) old.remove();
+      const old = c.ring.querySelector(".bomb-ico"); if (old) old.remove();
       for (const el of Object.values(c.map)) el.classList.remove("bomb-has");
       if (st.sub === "live") {
         const hel = c.map[st.holder];
@@ -3845,23 +3876,28 @@ const bomb = {
         c.boomKey = st.bombNo;
         const lel = c.map[st.loser];
         if (lel) { const ic = document.createElement("div"); ic.className = "bomb-ico bomb-boom"; ic.textContent = "💥"; lel.appendChild(ic); charSay(lel, "펑!!", 2000); }
-        this._setStatus(`💥 ${(ctx.players()[st.loser] || {}).nick || "?"}에게서 폭탄이 터졌다! 탈락!`);
+        this._setStatus(`💥 ${(ctx.players()[st.loser] || {}).nick || "?"} 탈락!`);
+        if (c.probEl) c.probEl.textContent = "💥";
         sfx.boom(); vibrate(400);
       }
       c.lastKey = key;
     }
 
-    // 상태/확률 표시
+    // 상단 배너 = 상태 문구만 / 가운데 = 터질 확률 크게 (모두가 봄)
     const survivors = Object.keys(ctx.players()).filter(id => !out[id]).length;
     if (st.sub === "live") {
       const prob = Math.round(bombProb(st.passCount || 0) * 100);
+      if (c.lastProb !== prob) {
+        c.lastProb = prob;
+        if (c.probEl) c.probEl.textContent = prob + "%";
+        if (c.centerEl) c.centerEl.className = "bomb-center " + (prob >= 55 ? "risk-hi" : prob >= 28 ? "risk-mid" : "risk-lo");
+      }
       const mine = st.holder === ctx.uid;
-      this._setStatus(mine
-        ? `💣 너에게 폭탄!! 넘기면 상대가 ${prob}% 확률로 터짐!`
-        : `${(ctx.players()[st.holder] || {}).nick || "?"} 보유 · 터질 확률 ${prob}%`);
+      this._setStatus(mine ? "💣 나에게 폭탄!! 빨리 넘겨!!" : `${(ctx.players()[st.holder] || {}).nick || "?"}에게 폭탄이 있다!`);
       if (c.noteEl) c.noteEl.textContent = `생존 ${survivors}명 / 목표 ${st.target}명 · ` + (mine ? "다른 친구를 눌러 넘겨!!" : "곧 나에게 올 수도…");
     } else if (st.sub === "done") {
       this._setStatus(`🎉 ${survivors}명 생존! 끝까지 살아남았다!`);
+      if (c.centerEl) c.centerEl.style.opacity = "0";
     }
   },
 
@@ -3925,7 +3961,7 @@ const bomb = {
     }
     return { outcome, detail };
   },
-  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); if (c.cleanupWin) c.cleanupWin(); this._c = null; }
 };
 
 // ═════════════════════════════════════════════
@@ -4318,7 +4354,7 @@ const vote = {
     }
     const played = players.filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "v"))
       .sort((a, b) => score[b] - score[a]);
-    return tierOutcome(ctx, played, pid => `${score[pid]}번 눈치 성공`, "한 번도 안 냈다… 💤");
+    return tierOutcome(ctx, played, pid => `${score[pid]}번 눈치 성공`, "한 번도 안 냈다… 💤", pid => score[pid]);
   },
   unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); (c.timers || []).forEach(clearTimeout); this._c = null; }
 };
@@ -4522,7 +4558,7 @@ const math = {
     }
     const played = players.filter(p => inputs[p] && Object.keys(inputs[p]).some(k => k[0] === "q"))
       .sort((a, b) => score[b] - score[a]);
-    return tierOutcome(ctx, played, pid => score[pid] + "점", "한 문제도 안 풀었다… 💤");
+    return tierOutcome(ctx, played, pid => score[pid] + "점", "한 문제도 안 풀었다… 💤", pid => score[pid]);
   },
   unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
 };

@@ -1353,7 +1353,22 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 
 /* ── 폭탄 돌리기! ─────────────────────────── */
 .bomb-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.bomb-status { text-align: center; font-size: 1.3rem; padding: 0.3rem 0; }
+.bomb-status { text-align: center; font-size: 1.35rem; padding: 0.3rem 0; }
+/* 플레이어 원형 배치 + 가운데 큰 확률 */
+.bomb-ring { flex: 1; position: relative; min-height: 0; width: 100%; }
+.bomb-ring .char { position: absolute; transform: translate(-50%, -50%); transition: left 0.18s, top 0.18s; }
+.bomb-ring .char.bomb-has { z-index: 3; }
+.bomb-ring .char.bomb-has .char-box { animation: bombHold 0.3s ease-in-out infinite; }
+.bomb-center {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  text-align: center; z-index: 2; pointer-events: none; transition: opacity 0.3s;
+}
+.bomb-prob-lbl { font-size: 1.05rem; color: var(--ink-soft); font-weight: 700; }
+.bomb-prob { font-size: clamp(3rem, 15vw, 5rem); font-weight: 700; line-height: 1; }
+.bomb-center.risk-lo .bomb-prob { color: var(--green); }
+.bomb-center.risk-mid .bomb-prob { color: #e0a021; }
+.bomb-center.risk-hi .bomb-prob { color: var(--red); animation: bombProbPulse 0.5s ease-in-out infinite; }
+@keyframes bombProbPulse { 50% { transform: scale(1.12); } }
 .bomb-field { flex: 1; align-content: center; }
 .bomb-field .char { position: relative; transition: transform 0.15s; }
 .bomb-field .char.bomb-has { transform: scale(1.16); z-index: 3; }
