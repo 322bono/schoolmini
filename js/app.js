@@ -943,7 +943,7 @@ const GAME_SHORT = {
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
-  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼"
+  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼", slot: "슬롯"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1285,6 +1285,7 @@ setInterval(() => { hostCheckEarly(); botDrive(); hostJanitor(); }, 450);
 function botIds() { return Object.keys(playersCache).filter(id => id.startsWith("bot_")); }
 
 let botLastMove = 0;
+const slotBotNext = {}; // 슬롯머신 봇별 다음 스핀 시각
 function botDrive() {
   if (!isHost || !room || !meta || meta.phase !== "play") return;
   const nowMs = Date.now();
@@ -1434,6 +1435,16 @@ function botDrive() {
         if (t - last > 400 + Math.random() * 700) {
           ts.push(t);
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { ts: ts.slice(-80) });
+        }
+      }
+    } else if (g === "slot") {
+      // 봇은 자기 슬롯을 주기적으로 돌려 ±1~±3 (특수는 생략 — 테스트용)
+      const out = (gameCache.out) || {};
+      if (state && state.startAt && t > state.startAt && t < state.endAt && !out[pid]) {
+        if (t >= (slotBotNext[pid] || 0)) {
+          slotBotNext[pid] = t + 2000 + Math.random() * 1600;
+          const d = Math.random() < 0.5 ? 1 : Math.random() < 0.65 ? -1 : Math.random() < 0.5 ? 3 : -3;
+          net.dbTxn(`rooms/${room}/game/scores/${pid}`, cur => (cur || 0) + d).catch(() => {});
         }
       }
     } else if (g === "mugunghwa") {

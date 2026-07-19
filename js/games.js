@@ -4872,6 +4872,277 @@ const syncbtn = {
 };
 
 // ═════════════════════════════════════════════
+// 25. 슬롯머신!  (각자 슬롯을 돌려 확률별 결과 · 60초 뒤 상위 30% +1)
+// ═════════════════════════════════════════════
+const SLOT_LEAD = 3000, SLOT_DUR = 60000, SLOT_SPINMS = 1500, SLOT_PICK_MS = 6000;
+// 확률(%): 합계 100. d=점수변화, 특수(steal/elim/give)는 대상 필요
+export const SLOT_OUTS = [
+  { type: "p1", w: 40, sym: "🪙", label: "+1점", d: 1, cls: "s-plus" },
+  { type: "m1", w: 40, sym: "☁️", label: "-1점", d: -1, cls: "s-minus" },
+  { type: "p3", w: 5, sym: "💰", label: "+3점!", d: 3, cls: "s-plus" },
+  { type: "m3", w: 5, sym: "🌧️", label: "-3점", d: -3, cls: "s-minus" },
+  { type: "steal", w: 2, sym: "🦹", label: "상대 점수 2점 뺏기!", cls: "s-spec" },
+  { type: "jack", w: 2, sym: "7️⃣", label: "레전드 잭팟 +8!!", d: 8, cls: "s-jack" },
+  { type: "bust", w: 2, sym: "💀", label: "레전드 폭망 -8…", d: -8, cls: "s-bust" },
+  { type: "elim", w: 2, sym: "☠️", label: "상대 탈락시키기!", cls: "s-spec" },
+  { type: "give", w: 2, sym: "🎁", label: "랜덤 상대에게 5점 선물", cls: "s-spec" }
+];
+const SLOT_SYMS = SLOT_OUTS.map(o => o.sym);
+function slotRoll() { let r = Math.random() * 100, a = 0; for (const o of SLOT_OUTS) { a += o.w; if (r < a) return o; } return SLOT_OUTS[0]; }
+
+const slot = {
+  id: "slot",
+  name: "슬롯머신!",
+  tag: "운빨 슬롯! 잭팟도 폭망도 뺏기도 다 있다!",
+
+  stampOnTimeout: false,
+  hideHudTimer: true,
+  duration: () => SLOT_LEAD + SLOT_DUR + 3000,
+  hostSetup(ctx) { const startAt = ctx.playStart + SLOT_LEAD; return { startAt, endAt: startAt + SLOT_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, ended: false, spinning: false, spinStart: 0, result: null, elimShown: false, lastScore: null };
+    stage.innerHTML = `
+      <div class="slot-wrap">
+        <div class="slot-top">
+          <span class="sketch hud-chip">내 점수: <b id="slotScore">0</b></span>
+          <span class="wa-count" id="slotCount"></span>
+        </div>
+        <div class="slot-machine">
+          <div class="slot-reel" id="slotReel">🎰</div>
+        </div>
+        <div class="slot-result" id="slotResult">돌려서 운을 시험해봐!</div>
+        <div class="slot-lead" id="slotLead"></div>
+        <div class="slot-picker" id="slotPicker" hidden>
+          <div class="slot-picker-t" id="slotPickerT">대상 선택!</div>
+          <div class="slot-picker-list" id="slotPickerList"></div>
+        </div>
+      </div>`;
+    c.scoreEl = stage.querySelector("#slotScore");
+    c.countEl = stage.querySelector("#slotCount");
+    c.reelEl = stage.querySelector("#slotReel");
+    c.resultEl = stage.querySelector("#slotResult");
+    c.leadEl = stage.querySelector("#slotLead");
+    c.picker = stage.querySelector("#slotPicker");
+    c.pickerT = stage.querySelector("#slotPickerT");
+    c.pickerList = stage.querySelector("#slotPickerList");
+    const btn = actionBtn(dock, "🎰 돌리기!");
+    btn.disabled = true;
+    c.btn = btn;
+    btn.addEventListener("click", () => this._spin(ctx));
+    c.stopLoop = gameLoop(t => this._tick(ctx, t));
+  },
+
+  _scores(ctx) { return (ctx.game() && ctx.game().scores) || {}; },
+  _out(ctx) { return (ctx.game() && ctx.game().out) || {}; },
+
+  _spin(ctx) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || !c.started || c.spinning || c.ended) return;
+    if (this._out(ctx)[ctx.uid] || ctx.now() > st.endAt) return;
+    if (!c.picker.hidden) return;
+    c.spinning = true;
+    c.spinStart = performance.now();
+    c.result = slotRoll();
+    c.btn.disabled = true;
+    c.reelEl.className = "slot-reel slot-spinning";
+    c.resultEl.textContent = "두구두구…";
+    c.resultEl.className = "slot-result";
+    sfx.tick();
+  },
+
+  _tick(ctx, t) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const now = ctx.now();
+    if (now < st.startAt) {
+      const n = Math.ceil((st.startAt - now) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.reelEl.textContent = n; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.reelEl.textContent = "🎰"; if (!this._out(ctx)[ctx.uid]) c.btn.disabled = false; gameStartFx(); }
+
+    // 내 점수 표시
+    const myScore = this._scores(ctx)[ctx.uid] || 0;
+    if (myScore !== c.lastScore) { c.lastScore = myScore; if (c.scoreEl) c.scoreEl.textContent = myScore; }
+    // 상위권 리드 표시
+    this._renderLead(ctx);
+
+    // 탈락 당함
+    if (this._out(ctx)[ctx.uid] && !c.elimShown) {
+      c.elimShown = true;
+      c.spinning = false;
+      c.reelEl.textContent = "☠️"; c.reelEl.className = "slot-reel s-bust";
+      c.resultEl.textContent = "누군가에게 탈락당했다… 구경모드"; c.resultEl.className = "slot-result s-bust";
+      c.btn.disabled = true; c.btn.textContent = "탈락…";
+      this._hidePicker();
+      sfx.buzz(); vibrate(300);
+    }
+
+    // 릴 애니메이션
+    if (c.spinning) {
+      const p = Math.min(1, (t - c.spinStart) / SLOT_SPINMS);
+      if (p < 1) {
+        const idx = Math.floor(t / (45 + p * p * 240)) % SLOT_SYMS.length; // 점점 느리게
+        c.reelEl.textContent = SLOT_SYMS[idx];
+      } else {
+        c.spinning = false;
+        c.reelEl.textContent = c.result.sym;
+        c.reelEl.className = "slot-reel " + c.result.cls + " slot-land";
+        this._land(ctx, c.result);
+      }
+    }
+
+    // 타이머
+    if (!c.ended) {
+      const remain = Math.max(0, Math.ceil((st.endAt - now) / 1000));
+      const txt = remain + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      if (now > st.endAt) {
+        c.ended = true;
+        if (!this._out(ctx)[ctx.uid]) { c.btn.disabled = true; c.btn.textContent = "끝!!"; }
+        c.reelEl.className = "slot-reel";
+        c.resultEl.textContent = `끝! 내 최종 ${myScore}점`;
+        this._hidePicker();
+        sfx.whistle();
+      }
+    }
+  },
+
+  _land(ctx, result) {
+    const c = this._c;
+    sfx.pop();
+    if (result.type === "steal" || result.type === "elim") {
+      this._showPicker(ctx, result);
+      return;
+    }
+    let tgt = null, tgtNick = null;
+    if (result.type === "give") { tgt = this._randomTarget(ctx); tgtNick = tgt ? (ctx.players()[tgt] || {}).nick : null; }
+    this._apply(ctx, result, tgt);
+    this._showResult(ctx, result, tgtNick);
+    this._cooldown(ctx);
+  },
+
+  _apply(ctx, result, target) {
+    if (result.d !== undefined) {
+      ctx.txn(`game/scores/${ctx.uid}`, cur => (cur || 0) + result.d).catch(() => {});
+      if (result.type === "jack") { sfx.win(); vibrate(200); }
+      else if (result.type === "bust") { sfx.buzz(); vibrate(200); }
+    } else if (result.type === "steal" && target) {
+      ctx.txn(`game/scores/${ctx.uid}`, cur => (cur || 0) + 2).catch(() => {});
+      ctx.txn(`game/scores/${target}`, cur => (cur || 0) - 2).catch(() => {});
+      sfx.coin();
+    } else if (result.type === "give" && target) {
+      ctx.txn(`game/scores/${target}`, cur => (cur || 0) + 5).catch(() => {});
+      ctx.txn(`game/scores/${ctx.uid}`, cur => (cur || 0) - 5).catch(() => {});
+    } else if (result.type === "elim" && target) {
+      ctx.txn(`game/out/${target}`, () => 1).catch(() => {});
+      sfx.boom();
+    }
+  },
+
+  _showResult(ctx, result, tgtNick) {
+    const c = this._c;
+    let txt = result.label;
+    if (result.type === "steal") txt = `🦹 ${tgtNick || "?"}의 점수 2점 뺏었다!`;
+    else if (result.type === "elim") txt = `☠️ ${tgtNick || "?"} 탈락시켰다!`;
+    else if (result.type === "give") txt = `🎁 ${tgtNick || "?"}에게 5점 선물!`;
+    c.resultEl.textContent = txt;
+    c.resultEl.className = "slot-result " + result.cls;
+  },
+
+  _randomTarget(ctx) {
+    const out = this._out(ctx);
+    const cands = Object.keys(ctx.players()).filter(id => id !== ctx.uid && !out[id]);
+    return cands.length ? cands[Math.floor(Math.random() * cands.length)] : null;
+  },
+
+  _showPicker(ctx, result) {
+    const c = this._c;
+    const out = this._out(ctx);
+    const cands = Object.keys(ctx.players()).filter(id => id !== ctx.uid && !out[id]);
+    if (!cands.length) { // 대상 없음 → 그냥 넘어감
+      c.resultEl.textContent = result.type === "steal" ? "뺏을 상대가 없다…" : "탈락시킬 상대가 없다…";
+      this._cooldown(ctx); return;
+    }
+    c.pickerT.textContent = result.type === "steal" ? "🦹 점수 2점 뺏을 상대!" : "☠️ 탈락시킬 상대!";
+    c.pickerList.innerHTML = "";
+    for (const pid of cands) {
+      const b = document.createElement("button");
+      b.className = "slot-pick";
+      b.style.setProperty("--pc", ctx.colorOf(pid));
+      b.textContent = (ctx.players()[pid] || {}).nick || "?";
+      b.addEventListener("click", () => {
+        this._hidePicker();
+        this._apply(ctx, result, pid);
+        this._showResult(ctx, result, (ctx.players()[pid] || {}).nick);
+        this._cooldown(ctx);
+      });
+      c.pickerList.appendChild(b);
+    }
+    c.picker.hidden = false;
+    // 시간 내 미선택 → 랜덤 자동
+    clearTimeout(c.pickTimer);
+    c.pickTimer = setTimeout(() => {
+      if (!this._c || c.picker.hidden) return;
+      const t = cands[Math.floor(Math.random() * cands.length)];
+      this._hidePicker();
+      this._apply(ctx, result, t);
+      this._showResult(ctx, result, (ctx.players()[t] || {}).nick);
+      this._cooldown(ctx);
+    }, SLOT_PICK_MS);
+  },
+
+  _hidePicker() { const c = this._c; if (c) { c.picker.hidden = true; clearTimeout(c.pickTimer); } },
+
+  _cooldown(ctx) {
+    const c = this._c;
+    if (!c) return;
+    clearTimeout(c.cdTimer);
+    c.cdTimer = setTimeout(() => {
+      if (!this._c) return;
+      const st = ctx.state();
+      if (c.btn && !c.ended && !this._out(ctx)[ctx.uid] && st && ctx.now() < st.endAt) { c.btn.disabled = false; }
+      if (c.reelEl) c.reelEl.className = "slot-reel";
+    }, 700);
+  },
+
+  _renderLead(ctx) {
+    const c = this._c;
+    if (!c || !c.leadEl) return;
+    const scores = this._scores(ctx), out = this._out(ctx);
+    const ids = Object.keys(ctx.players()).filter(id => !out[id]).sort((a, b) => (scores[b] || 0) - (scores[a] || 0));
+    const top = ids[0];
+    c.leadEl.textContent = top ? `👑 1위 ${(ctx.players()[top] || {}).nick}: ${scores[top] || 0}점` : "";
+  },
+
+  onState() {}, onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) { return state && state.endAt && ctx.now() > state.endAt + 800 ? 1400 : false; },
+  evaluate(ctx, inputs, state) {
+    const scores = (ctx.game() && ctx.game().scores) || {};
+    const out = (ctx.game() && ctx.game().out) || {};
+    const players = Object.keys(ctx.players());
+    const survivors = players.filter(p => !out[p]);
+    const ranked = survivors.slice().sort((a, b) => (scores[b] || 0) - (scores[a] || 0));
+    // 생존자끼리만 티어 계산 (탈락자는 자동 lose)
+    const survCtx = { players: () => { const o = {}; for (const p of survivors) o[p] = ctx.players()[p]; return o; } };
+    const res = survivors.length
+      ? tierOutcome(survCtx, ranked, pid => (scores[pid] || 0) + "점", "?", pid => scores[pid] || 0)
+      : { outcome: {}, detail: {} };
+    const outcome = {}, detail = {};
+    for (const p of players) {
+      if (out[p]) { outcome[p] = "lose"; detail[p] = "슬롯에서 탈락당했다… ☠️"; }
+      else { outcome[p] = res.outcome[p]; detail[p] = res.detail[p]; }
+    }
+    return { outcome, detail };
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); clearTimeout(c.pickTimer); clearTimeout(c.cdTimer); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -5152,5 +5423,14 @@ syncbtn.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn };
+slot.demo = () => {
+  const d = dmStage("dm-slot");
+  d.appendChild(dmAt(dmProp("dm-sl-machine"), "50%", "18%"));
+  d.appendChild(dmAt(dmProp("dm-sl-reel", "🎰"), "50%", "26%"));
+  d.appendChild(dmAt(dmProp("dm-sl-res", "잭팟! +8"), "50%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-sl-hint", "운빨 슬롯! 잭팟·폭망·뺏기!"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn", "slot"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn, slot };

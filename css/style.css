@@ -1198,6 +1198,14 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmMaAns { 0%, 25% { opacity: 0; } 35%, 90% { opacity: 1; } 100% { opacity: 0; } }
 .dm-ma-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
+/* 슬롯머신: 릴이 돌다 잭팟 */
+.dm-sl-machine { width: 74px; height: 74px; border: 4px solid var(--ink); border-radius: 14px; background: linear-gradient(#ffe14d, #f5a623); }
+.dm-sl-reel { font-size: 2rem; animation: dmSlReel 2.6s steps(1, end) infinite; }
+@keyframes dmSlReel { 0% { transform: translateX(-50%) rotate(0); } 20%, 55% { } 60%, 100% { } }
+.dm-sl-res { font-size: 1.1rem; color: var(--green); font-weight: 700; opacity: 0; animation: dmSlRes 2.6s infinite; }
+@keyframes dmSlRes { 0%, 55% { opacity: 0; } 62%, 92% { opacity: 1; transform: translateX(-50%) scale(1.1); } 100% { opacity: 0; } }
+.dm-sl-hint { font-size: 0.9rem; color: var(--ink-soft); }
+
 /* 눈치 버튼: 동시에 누르면 +1 */
 .dm-sy-tapa { font-size: 1.5rem; animation: dmMTap 1.2s ease-in-out infinite; }
 .dm-sy-tapb { font-size: 1.5rem; animation: dmMTap 1.2s ease-in-out infinite; }
@@ -1486,6 +1494,50 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .quiz-opt.quiz-dim { opacity: 0.55; }
 .quiz-opt.quiz-right { outline: 4px solid var(--green); outline-offset: 2px; }
 .quiz-opt.quiz-wrong { opacity: 0.4; }
+
+/* ── 슬롯머신! ────────────────────────────── */
+.slot-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.7rem; min-height: 0; padding-top: 0.3rem; position: relative; }
+.slot-top { display: flex; gap: 0.9rem; align-items: center; }
+.slot-machine {
+  width: 190px; height: 190px; flex: 0 0 auto; box-sizing: border-box;
+  border: 5px solid var(--ink); border-radius: 20px;
+  background: linear-gradient(#ffe14d, #f5a623);
+  box-shadow: inset 0 -6px 0 rgba(0,0,0,0.12), 5px 6px 0 rgba(51,49,46,0.18);
+  display: flex; align-items: center; justify-content: center;
+}
+.slot-reel {
+  width: 140px; height: 140px; box-sizing: border-box; flex: 0 0 auto;
+  background: #fffdf6; border: 3px solid var(--ink); border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 4rem; line-height: 1; overflow: hidden;
+}
+.slot-reel.slot-spinning { animation: slotShake 0.1s linear infinite; }
+@keyframes slotShake { 50% { transform: translateY(-2px); } }
+.slot-reel.slot-land { animation: slotLand 0.4s cubic-bezier(0.2,1.8,0.4,1); }
+@keyframes slotLand { 0% { transform: scale(1.4); } 100% { transform: scale(1); } }
+.slot-reel.s-plus { background: #d9f5d0; }
+.slot-reel.s-minus { background: #f3e2de; }
+.slot-reel.s-jack { background: #fff2b8; box-shadow: 0 0 0 4px var(--hl); }
+.slot-reel.s-bust { background: #e8d9d5; }
+.slot-reel.s-spec { background: #e5dcf3; }
+.slot-result { font-size: clamp(1.15rem, 5vw, 1.6rem); font-weight: 700; text-align: center; min-height: 1.5em; }
+.slot-result.s-plus, .slot-result.s-jack { color: var(--green); animation: vcRowPop 0.4s cubic-bezier(0.2,1.8,0.4,1); }
+.slot-result.s-minus, .slot-result.s-bust { color: var(--red); }
+.slot-result.s-spec { color: #7a4fc0; }
+.slot-lead { font-size: 1rem; color: var(--ink-soft); font-weight: 700; min-height: 1.3em; }
+.slot-picker {
+  position: absolute; inset: 0; z-index: 6;
+  background: rgba(250,247,239,0.96); border-radius: 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.8rem; padding: 1rem;
+}
+.slot-picker[hidden] { display: none; }
+.slot-picker-t { font-size: 1.4rem; font-weight: 700; text-align: center; }
+.slot-picker-list { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: center; max-height: 60%; overflow-y: auto; }
+.slot-pick {
+  border: 3px solid var(--ink); border-radius: var(--r1); background: #fff;
+  color: var(--pc); font-weight: 700; font-size: 1.1rem; padding: 0.4em 0.9em; cursor: pointer; font-family: inherit;
+}
+.slot-pick:active { transform: scale(0.94); background: var(--hl); }
 
 /* ── 눈치 버튼! ───────────────────────────── */
 .sync-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1rem; min-height: 0; padding-top: 0.4rem; }
