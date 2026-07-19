@@ -9,7 +9,7 @@
 //   hostEarlyEnd(ctx, i, s)    : 조기 종료 조건 → false | 지연ms
 //   evaluate(ctx, i, s)        : {outcome:{uid:'win'|'lose'}, detail:{uid:문구}}
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { sfx, playDrumroll, cdTick, gameStartFx, loadUrlBuffer, decodeB64Audio, playBuffer, resumeAudio } from "./sfx.js";
+import { sfx, playDrumroll, cdTick, gameStartFx, loadUrlBuffer, decodeB64Audio, playBuffer, resumeAudio, stopSfxTails } from "./sfx.js";
 
 // ── 공통 헬퍼 ────────────────────────────────
 function shuffle(arr) {
@@ -383,7 +383,7 @@ const mugunghwa = {
         c.btn.textContent = "잡혔다… 😵";
         return;
       }
-      c.myX = Math.min(100, c.myX + dt * 4.2); // 도망자 이동 속도 (대폭 감소: 8 → 4.2)
+      c.myX = Math.min(100, c.myX + dt * 3.2); // 도망자 이동 속도 (더 낮춤: 4.2 → 3.2)
       const el = c.runnerEls[ctx.uid];
       if (el) {
         el.style.left = (8 + c.myX * 0.72) + "%";
@@ -3733,53 +3733,60 @@ const bolt = {
 };
 
 // ═════════════════════════════════════════════
-// 19. 폭탄 돌리기!
+// 19. 폭탄 돌리기!  (넘길 때마다 터질 확률이 점점 오름 → 상위 40% 생존)
 // ═════════════════════════════════════════════
 const BOMB_LEAD = 3000;
-const BOMB_MIN = 7000, BOMB_MAX = 15000;
-const BOMB_HOLD_MIN = 450; // 받자마자 즉시 되던지기 방지 (최소 보유시간)
+const BOMB_HOLD_MIN = 400;   // 받자마자 즉시 되던지기 방지
+const BOMB_HOLD_MAX = 5000;  // 너무 오래 들고 있으면 자동으로 아무에게나 넘겨짐
+const BOMB_BOOM_MS = 2300;   // 폭발 연출 뒤 다음 폭탄으로
+const BOMB_BASE = 0.05, BOMB_STEP = 0.08, BOMB_CAP = 0.92; // 첫 패스 5% → 넘길수록 +8%
+
+// 다음 패스가 터질 확률 (넘긴 횟수 기준). passCount번 넘겼으면 다음(=passCount+1번째) 패스 확률.
+function bombProb(passCount) { return Math.min(BOMB_CAP, BOMB_BASE + BOMB_STEP * passCount); }
+// 몇 번째 패스에서 터질지 미리 뽑음 — 상승 확률로 매 패스 굴리는 것과 수학적으로 동일하지만
+// 모든 기기에서 결과가 100% 일치(호스트만 뽑아 state에 저장, 클라는 passCount와 비교).
+function bombExplodeOn() {
+  let k = 1;
+  while (k < 300) { if (Math.random() < bombProb(k - 1)) return k; k++; }
+  return k;
+}
 
 const bomb = {
   id: "bomb",
   name: "폭탄 돌리기!",
-  tag: "터지기 전에 다른 사람에게 넘겨!",
+  tag: "넘길수록 터질 확률↑! 끝까지 살아남아!",
 
   stampOnTimeout: false,
-  duration: () => BOMB_LEAD + BOMB_MAX + 4200,
+  duration: () => BOMB_LEAD + 65000, // 상한(대규모 대비). 목표 인원 도달 시 조기 종료
   hostSetup(ctx) {
     const players = ctx.players();
     const ids = Object.keys(players);
     const humans = ids.filter(id => !players[id].bot && players[id].online !== false);
     const pool = humans.length ? humans : ids;
-    const holder = pool[Math.floor(Math.random() * pool.length)];
     const startAt = ctx.playStart + BOMB_LEAD;
     return {
-      holder, lastPasser: null, holdSince: startAt, startAt,
-      fuseEnd: startAt + BOMB_MIN + Math.floor(Math.random() * (BOMB_MAX - BOMB_MIN)),
-      exploded: false, loser: null
+      sub: "live", holder: pool[Math.floor(Math.random() * pool.length)], lastPasser: null,
+      holdSince: startAt, passCount: 0, explodeOn: bombExplodeOn(), out: {},
+      loser: null, bombNo: 1, target: Math.max(1, Math.ceil(ids.length * 0.4)), startAt
     };
   },
 
   _c: null,
   mount(stage, dock, ctx) {
-    const c = this._c = { lastCount: -1, started: false, lastHolder: null, boomShown: false };
-    stage.innerHTML = `
-      <div class="bomb-wrap">
-        <div class="bomb-status sketch" id="bombStatus">폭탄 준비 중…</div>
-      </div>`;
+    const c = this._c = { lastCount: -1, started: false, lastKey: "", boomKey: 0 };
+    stage.innerHTML = `<div class="bomb-wrap"><div class="bomb-status sketch" id="bombStatus">폭탄 준비 중…</div></div>`;
     const wrap = stage.querySelector(".bomb-wrap");
     c.statusEl = stage.querySelector("#bombStatus");
-    const { field, map } = buildCharField(wrap, ctx, { size: 50 });
+    const { field, map } = buildCharField(wrap, ctx, { size: 48 });
     field.classList.add("bomb-field");
     for (const [pid, el] of Object.entries(map)) el.dataset.pid = pid;
     c.map = map; c.field = field;
     dock.innerHTML = `<div class="game-note" id="bombNote">💣 폭탄을 든 사람은 다른 친구를 눌러서 넘겨!</div>`;
     c.noteEl = dock.querySelector("#bombNote");
 
-    // 폭탄 든 사람이 다른 캐릭터를 탭 → 넘김
     field.addEventListener("pointerdown", e => {
       const st = ctx.state();
-      if (!st || st.exploded || st.holder !== ctx.uid) return;
+      if (!st || st.sub !== "live" || st.holder !== ctx.uid) return;
       const charEl = e.target.closest(".char");
       if (!charEl || !charEl.dataset.pid) return;
       this._pass(ctx, charEl.dataset.pid);
@@ -3787,14 +3794,17 @@ const bomb = {
     c.stopLoop = gameLoop(() => this._tick(ctx));
   },
 
-  // 넘기기 = game/state 트랜잭션. "현재 홀더가 나"라는 조건 자체가 가드라
-  // 스테일 입력/중복 처리가 원천 차단된다 (별도 nonce 불필요 = 예전 버그 방지).
+  // 넘기기 = game/state 트랜잭션. "현재 홀더가 나"가 가드라 스테일/중복이 원천 차단.
+  // passCount가 explodeOn에 도달하면 받는 사람에서 폭발(모든 기기 동일).
   _pass(ctx, tgt) {
     ctx.txn("game/state", cur => {
-      if (!cur || cur.exploded || cur.holder !== ctx.uid || tgt === ctx.uid) return;
-      if (ctx.now() < (cur.holdSince || 0) + BOMB_HOLD_MIN) return; // 최소 보유시간 미달
-      if (!ctx.players()[tgt]) return; // 나간 사람에게는 못 넘김
-      return Object.assign({}, cur, { holder: tgt, lastPasser: ctx.uid, holdSince: ctx.now() });
+      if (!cur || cur.sub !== "live" || cur.holder !== ctx.uid || tgt === ctx.uid) return;
+      if ((cur.out || {})[tgt] || !ctx.players()[tgt]) return; // 탈락자/나간 사람 제외
+      if (ctx.now() < (cur.holdSince || 0) + BOMB_HOLD_MIN) return;
+      const pc = (cur.passCount || 0) + 1;
+      const patch = { holder: tgt, lastPasser: ctx.uid, holdSince: ctx.now(), passCount: pc };
+      if (pc >= cur.explodeOn) { patch.sub = "boom"; patch.loser = tgt; patch.boomAt = ctx.now(); }
+      return Object.assign({}, cur, patch);
     }).catch(() => {});
     sfx.swoosh();
   },
@@ -3812,39 +3822,46 @@ const bomb = {
     }
     if (!c.started) { c.started = true; gameStartFx(); }
 
-    // 폭탄 위치가 바뀌면 아이콘 이동 + 하이라이트
-    if (c.lastHolder !== st.holder) {
-      const old = c.field.querySelector(".bomb-ico");
-      if (old) old.remove();
-      for (const [pid, el] of Object.entries(c.map)) el.classList.toggle("bomb-has", pid === st.holder && !st.exploded);
-      const hel = c.map[st.holder];
-      if (hel && !st.exploded) {
-        const ic = document.createElement("div");
-        ic.className = "bomb-ico"; ic.textContent = "💣";
-        hel.appendChild(ic);
+    // 탈락자 표시 (host가 out에 넣으면 페이드+X)
+    const out = st.out || {};
+    for (const [pid, el] of Object.entries(c.map)) {
+      if (out[pid] && !el._out) {
+        el._out = true;
+        setFace(el, "dead"); setMotion(el, "caught"); el.style.opacity = 0.4;
+        const x = document.createElement("div"); x.className = "bomb-x"; x.textContent = "❌"; el.appendChild(x);
       }
-      c.lastHolder = st.holder;
-      if (!st.exploded && c.started) sfx.pop();
     }
 
-    if (!st.exploded) {
+    // 폭탄 아이콘 위치 (live=홀더에 💣, boom=loser에 💥)
+    const key = st.sub + ":" + st.holder + ":" + st.bombNo + ":" + (st.loser || "");
+    if (c.lastKey !== key) {
+      const old = c.field.querySelector(".bomb-ico"); if (old) old.remove();
+      for (const el of Object.values(c.map)) el.classList.remove("bomb-has");
+      if (st.sub === "live") {
+        const hel = c.map[st.holder];
+        if (hel) { hel.classList.add("bomb-has"); const ic = document.createElement("div"); ic.className = "bomb-ico"; ic.textContent = "💣"; hel.appendChild(ic); }
+        if (c.started && c.lastKey) sfx.pop();
+      } else if (st.sub === "boom" && c.boomKey !== st.bombNo) {
+        c.boomKey = st.bombNo;
+        const lel = c.map[st.loser];
+        if (lel) { const ic = document.createElement("div"); ic.className = "bomb-ico bomb-boom"; ic.textContent = "💥"; lel.appendChild(ic); charSay(lel, "펑!!", 2000); }
+        this._setStatus(`💥 ${(ctx.players()[st.loser] || {}).nick || "?"}에게서 폭탄이 터졌다! 탈락!`);
+        sfx.boom(); vibrate(400);
+      }
+      c.lastKey = key;
+    }
+
+    // 상태/확률 표시
+    const survivors = Object.keys(ctx.players()).filter(id => !out[id]).length;
+    if (st.sub === "live") {
+      const prob = Math.round(bombProb(st.passCount || 0) * 100);
       const mine = st.holder === ctx.uid;
-      this._setStatus(mine ? "💣 너에게 폭탄!! 빨리 넘겨!!" : `${(ctx.players()[st.holder] || {}).nick || "?"}가 폭탄을 들고 있다!`);
-      if (c.noteEl) c.noteEl.textContent = mine ? "💥 다른 친구를 눌러서 폭탄을 넘겨!!" : "💣 나한테 오면 바로 넘겨야 해…";
-    }
-
-    if (st.exploded && !c.boomShown) {
-      c.boomShown = true;
-      const lel = c.map[st.loser];
-      if (lel) {
-        setFace(lel, "dead"); setMotion(lel, "caught");
-        const ic = lel.querySelector(".bomb-ico"); if (ic) { ic.textContent = "💥"; ic.classList.add("bomb-boom"); }
-        charSay(lel, "펑!!", 2200);
-      }
-      this._setStatus(`💥 ${(ctx.players()[st.loser] || {}).nick || "?"}의 폭탄이 터졌다!`);
-      sfx.boom(); vibrate(400);
-      const wel = st.lastPasser && st.lastPasser !== st.loser ? c.map[st.lastPasser] : null;
-      if (wel) { setFace(wel, "happy"); setMotion(wel, "jump"); charSay(wel, "떠넘기기 성공! 😎", 2200); }
+      this._setStatus(mine
+        ? `💣 너에게 폭탄!! 넘기면 상대가 ${prob}% 확률로 터짐!`
+        : `${(ctx.players()[st.holder] || {}).nick || "?"} 보유 · 터질 확률 ${prob}%`);
+      if (c.noteEl) c.noteEl.textContent = `생존 ${survivors}명 / 목표 ${st.target}명 · ` + (mine ? "다른 친구를 눌러 넘겨!!" : "곧 나에게 올 수도…");
+    } else if (st.sub === "done") {
+      this._setStatus(`🎉 ${survivors}명 생존! 끝까지 살아남았다!`);
     }
   },
 
@@ -3852,41 +3869,59 @@ const bomb = {
   onState() {}, onInputs() {},
 
   hostTick(ctx, state) {
-    if (!state || state.exploded || typeof state.startAt !== "number") return;
+    if (!state || typeof state.startAt !== "number") return;
     const t = ctx.now();
     if (t < state.startAt) return;
     const players = ctx.players();
-    const hp = players[state.holder];
-    // 잠수/퇴장 홀더 → 온라인인 다른 사람에게 자동 이관 (+최소 2.5초 여유)
-    if (!hp || hp.online === false) {
-      const online = Object.keys(players).filter(id => players[id].online !== false && id !== state.holder);
-      if (online.length) {
-        ctx.txn("game/state", cur => {
-          if (!cur || cur.exploded) return;
-          const chp = players[cur.holder];
-          if (chp && chp.online !== false && players[cur.holder]) return; // 이미 복구됨
-          const tgt = online[Math.floor(Math.random() * online.length)];
-          return Object.assign({}, cur, { holder: tgt, holdSince: ctx.now(), fuseEnd: Math.max(cur.fuseEnd, ctx.now() + 2500) });
-        }).catch(() => {});
+    const ids = Object.keys(players);
+
+    if (state.sub === "boom") {
+      if (t >= (state.boomAt || 0) + BOMB_BOOM_MS) {
+        const newOut = Object.assign({}, state.out, { [state.loser]: 1 });
+        const survivors = ids.filter(id => !newOut[id]);
+        if (survivors.length <= state.target || survivors.length <= 1) {
+          ctx.writeState({ sub: "done", out: newOut });
+        } else {
+          const holder = survivors[Math.floor(Math.random() * survivors.length)];
+          ctx.writeState({
+            sub: "live", out: newOut, holder, lastPasser: null,
+            holdSince: t, passCount: 0, explodeOn: bombExplodeOn(),
+            loser: null, boomAt: null, bombNo: (state.bombNo || 1) + 1
+          });
+        }
       }
       return;
     }
-    if (t >= state.fuseEnd) {
+    if (state.sub !== "live") return;
+
+    // 잠수/퇴장 홀더거나 너무 오래 들고 있으면 → 아무 생존자에게 자동으로 넘김(확률 판정 그대로)
+    const hp = players[state.holder];
+    const holderGone = !hp || hp.online === false || (state.out || {})[state.holder];
+    const heldTooLong = t >= (state.holdSince || 0) + BOMB_HOLD_MAX;
+    if (holderGone || heldTooLong) {
+      const cands = ids.filter(id => !(state.out || {})[id] && players[id].online !== false && id !== state.holder);
+      if (!cands.length) return;
+      const tgt = cands[Math.floor(Math.random() * cands.length)];
       ctx.txn("game/state", cur => {
-        if (!cur || cur.exploded) return;
-        return Object.assign({}, cur, { exploded: true, loser: cur.holder, boomAt: ctx.now() });
+        if (!cur || cur.sub !== "live") return;
+        const chp = players[cur.holder];
+        const gone = !chp || chp.online === false || (cur.out || {})[cur.holder];
+        const long = ctx.now() >= (cur.holdSince || 0) + BOMB_HOLD_MAX;
+        if (!gone && !long) return; // 그새 사람이 넘겼음
+        const pc = (cur.passCount || 0) + 1;
+        const patch = { holder: tgt, lastPasser: cur.holder, holdSince: ctx.now(), passCount: pc };
+        if (pc >= cur.explodeOn) { patch.sub = "boom"; patch.loser = tgt; patch.boomAt = ctx.now(); }
+        return Object.assign({}, cur, patch);
       }).catch(() => {});
     }
   },
-  hostEarlyEnd(ctx, inputs, state) { return state && state.exploded ? 2600 : false; },
+  hostEarlyEnd(ctx, inputs, state) { return state && state.sub === "done" ? 2200 : false; },
   evaluate(ctx, inputs, state) {
-    const loser = state && state.loser;
-    const winner = state && state.lastPasser && state.lastPasser !== loser ? state.lastPasser : null;
+    const out = (state && state.out) || {};
     const outcome = {}, detail = {};
     for (const pid of Object.keys(ctx.players())) {
-      if (pid === loser) { outcome[pid] = "lose"; detail[pid] = "펑! 폭탄이 터졌다 💥"; }
-      else if (pid === winner) { outcome[pid] = "win"; detail[pid] = "떠넘기기 성공! 😎"; }
-      else { outcome[pid] = "mid"; detail[pid] = "무사히 살았다~ (±0)"; }
+      if (out[pid]) { outcome[pid] = "lose"; detail[pid] = "폭탄에 터졌다… 💥"; }
+      else { outcome[pid] = "win"; detail[pid] = "끝까지 생존! 🎉"; }
     }
     return { outcome, detail };
   },
@@ -3953,7 +3988,6 @@ const rps = {
       c.btns.appendChild(b);
     });
     c.stopLoop = gameLoop(() => this._tick(ctx));
-    gameStartFx();
   },
 
   _pick(ctx, hand) {
@@ -3980,7 +4014,7 @@ const rps = {
       this._setStatus(`상대와 대결 준비… ${n}`);
       return;
     }
-    if (!c.started) c.started = true;
+    if (!c.started) { c.started = true; gameStartFx(); } // 카운트다운 끝 → 예! 효과음
     if (st.sub === "pick") {
       const out = (st.out || {})[ctx.uid];
       const bye = st.pairs && st.pairs[ctx.uid] == null;
@@ -4149,7 +4183,6 @@ const vote = {
     c.scoreEl = stage.querySelector("#voteScore");
     c.countEl = stage.querySelector("#voteCount");
     c.stopLoop = gameLoop(() => this._tick(ctx));
-    gameStartFx();
   },
 
   _qs(ctx) {
@@ -4208,9 +4241,10 @@ const vote = {
     c.resEl.className = "vote-result";
     [...c.optsEl.children].forEach(b => b.classList.remove("vote-win", "vote-lose"));
 
-    // 2) 두구두구가 고조된 뒤 공개 + 결과음("예!") — 시작 타이밍 일치
+    // 2) 두구두구가 고조된 뒤 공개 + 결과음 — 드럼롤을 그 순간 끊어 "두구두구…딱!"으로 딱 맞춤
     c.timers.push(setTimeout(() => {
       if (this._c !== c) return; // 이미 다음 문제/언마운트
+      stopSfxTails(); // 드럼롤 꼬리 컷 → 결과음과 겹치지 않게
       [...c.optsEl.children].forEach((b, i) => {
         const cn = b.querySelector(".vote-cnt");
         if (cn) { cn.hidden = false; cn.textContent = cnts[i] + "표"; }
@@ -4231,7 +4265,7 @@ const vote = {
         c.resEl.className = "vote-result vote-r-lose";
         sfx.wrong && sfx.wrong();
       }
-    }, 1500));
+    }, 1400));
   },
 
   _tick(ctx) {
@@ -4245,7 +4279,7 @@ const vote = {
       if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
       return;
     }
-    if (!c.started) { c.started = true; c.countEl.textContent = ""; }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); } // 카운트다운 끝 → 예!
     if (st.sub === "ask") {
       if (c.qKey !== "q" + st.q) { c.qKey = "q" + st.q; c.revealKey = ""; this._renderQ(ctx, st); }
       const remain = Math.max(0, Math.ceil((st.askEnd - t) / 1000));
@@ -4368,7 +4402,6 @@ const math = {
     });
     c.pad = pad;
     c.stopLoop = gameLoop(() => this._tick(ctx));
-    gameStartFx();
   },
 
   _qs(ctx) {
@@ -4417,7 +4450,7 @@ const math = {
       if (n !== c.lastCount) { c.lastCount = n; c.exprEl.textContent = n + "…"; cdTick(); }
       return;
     }
-    if (!c.started) c.started = true;
+    if (!c.started) { c.started = true; gameStartFx(); } // 카운트다운 끝 → 예!
     const qs = this._qs(ctx);
     if (st.sub === "ask") {
       if (c.qKey !== "q" + st.i) {
@@ -4546,7 +4579,6 @@ const quiz = {
     dock.innerHTML = `<div class="quiz-opts" id="quizOpts"></div>`;
     c.optsEl = dock.querySelector("#quizOpts");
     c.stopLoop = gameLoop(() => this._tick(ctx));
-    gameStartFx();
   },
 
   _renderQ(ctx, st) {
@@ -4620,7 +4652,7 @@ const quiz = {
       if (n !== c.lastCount) { c.lastCount = n; c.qEl.textContent = n + "…"; cdTick(); }
       return;
     }
-    if (!c.started) c.started = true;
+    if (!c.started) { c.started = true; gameStartFx(); } // 카운트다운 끝 → 예!
     if (st.sub === "ask") {
       if (c.phase !== "ask") { c.phase = "ask"; this._renderQ(ctx, st); }
       const remain = Math.max(0, Math.ceil((st.answerEnd - t) / 1000));
@@ -4897,7 +4929,7 @@ bomb.demo = () => {
   d.appendChild(dmAt(dmChar(0, "dm-bo-from", 44), "24%", "44%"));
   d.appendChild(dmAt(dmChar(1, "dm-bo-to", 44), "70%", "44%"));
   d.appendChild(dmAt(dmProp("dm-bo-bomb", "💣"), "24%", "26%"));
-  d.appendChild(dmAt(dmProp("dm-bo-hint", "터지기 전에 넘겨!"), "50%", "86%"));
+  d.appendChild(dmAt(dmProp("dm-bo-hint", "넘길수록 확률↑ 터지면 탈락!"), "50%", "86%"));
   return d;
 };
 

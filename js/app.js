@@ -1382,15 +1382,18 @@ function botDrive() {
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { x: Math.round(x * 10) / 10, e: Math.round(e) });
       }
     } else if (g === "bomb") {
-      // 봇이 폭탄을 들고 있으면 잠깐 뒤 다른 사람에게 넘김
-      if (state && !state.exploded && state.holder === pid && state.startAt && t > state.startAt) {
-        if (t >= (state.holdSince || 0) + 700 + Math.random() * 900) {
-          const others = Object.keys(playersCache).filter(id => id !== pid);
-          const tgt = others[Math.floor(Math.random() * others.length)];
+      // 봇이 폭탄을 들고 있으면 잠깐 뒤 생존자 아무에게 넘김 (확률 폭발 판정 그대로 적용)
+      if (state && state.sub === "live" && state.holder === pid && state.startAt && t > state.startAt) {
+        if (t >= (state.holdSince || 0) + 700 + Math.random() * 1100) {
+          const survivors = Object.keys(playersCache).filter(id => id !== pid && !(state.out || {})[id]);
+          const tgt = survivors[Math.floor(Math.random() * survivors.length)];
           if (tgt) net.dbTxn(`rooms/${room}/game/state`, cur => {
-            if (!cur || cur.exploded || cur.holder !== pid) return;
-            if (t < (cur.holdSince || 0) + 450) return;
-            return Object.assign({}, cur, { holder: tgt, lastPasser: pid, holdSince: t });
+            if (!cur || cur.sub !== "live" || cur.holder !== pid) return;
+            if (t < (cur.holdSince || 0) + 400 || (cur.out || {})[tgt]) return;
+            const pc = (cur.passCount || 0) + 1;
+            const patch = { holder: tgt, lastPasser: pid, holdSince: t, passCount: pc };
+            if (pc >= cur.explodeOn) { patch.sub = "boom"; patch.loser = tgt; patch.boomAt = t; }
+            return Object.assign({}, cur, patch);
           }).catch(() => {});
         }
       }
@@ -1434,7 +1437,7 @@ function botDrive() {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { caught: 1 });
         }
       } else {
-        const step = (window.__SM_BOT_STEP || 1.4) + Math.random() * 0.9; // 봇 도망자 속도(사람과 맞춰 대폭 감소). 테스트: __SM_BOT_STEP
+        const step = (window.__SM_BOT_STEP || 1.0) + Math.random() * 0.7; // 봇 도망자 속도(사람과 맞춰 더 낮춤). 테스트: __SM_BOT_STEP
         const nx = Math.min(100, (v.x || 0) + step);
         net.dbUpdate(`rooms/${room}/game/inputs/${pid}`,
           nx >= 100 ? { x: 100, fin: 1 } : { x: Math.round(nx * 10) / 10 });
