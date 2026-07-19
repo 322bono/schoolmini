@@ -4740,6 +4740,138 @@ const quiz = {
 };
 
 // ═════════════════════════════════════════════
+// 24. 눈치 버튼!  (남이랑 동시에 누르면 +1, 혼자면 -1)
+// ═════════════════════════════════════════════
+const SYNC_LEAD = 3000, SYNC_DUR = 20000, SYNC_WIN = 150, SYNC_CD = 250;
+
+/** 모든 플레이어의 누른 시각을 모아 각 누름을 채점: 다른 사람이 150ms 내에 같이 눌렀으면 +1, 혼자면 -1 */
+function syncScores(players, inputs) {
+  const all = [];
+  for (const p of players) for (const t of ((inputs[p] && inputs[p].ts) || [])) all.push({ t, u: p });
+  all.sort((a, b) => a.t - b.t);
+  const score = {};
+  for (const p of players) score[p] = 0;
+  for (let i = 0; i < all.length; i++) {
+    const { t, u } = all[i];
+    let synced = false;
+    for (let j = i - 1; j >= 0 && t - all[j].t <= SYNC_WIN; j--) { if (all[j].u !== u) { synced = true; break; } }
+    if (!synced) for (let j = i + 1; j < all.length && all[j].t - t <= SYNC_WIN; j++) { if (all[j].u !== u) { synced = true; break; } }
+    score[u] += synced ? 1 : -1;
+  }
+  return score;
+}
+
+const syncbtn = {
+  id: "syncbtn",
+  name: "눈치 버튼!",
+  tag: "남이랑 동시에 누르면 +1, 혼자 누르면 -1!",
+
+  stampOnTimeout: false,
+  duration: () => SYNC_LEAD + SYNC_DUR + 2500,
+  hostSetup(ctx) { const startAt = ctx.playStart + SYNC_LEAD; return { startAt, endAt: startAt + SYNC_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, ended: false, myPresses: [], lastPress: 0, lastWrite: 0, score: 0 };
+    stage.innerHTML = `
+      <div class="sync-wrap">
+        <div class="sync-top"><span class="sketch hud-chip">내 점수: <b id="syncScore">0</b></span><span class="wa-count" id="syncCount"></span></div>
+        <div class="sync-feedback" id="syncFb">다른 사람과 타이밍을 맞춰봐!</div>
+        <div class="sync-presses" id="syncPresses"></div>
+      </div>`;
+    c.scoreEl = stage.querySelector("#syncScore");
+    c.countEl = stage.querySelector("#syncCount");
+    c.fbEl = stage.querySelector("#syncFb");
+    c.pressesEl = stage.querySelector("#syncPresses");
+    const btn = actionBtn(dock, "지금!!");
+    btn.disabled = true;
+    c.btn = btn;
+    btn.addEventListener("pointerdown", e => { e.preventDefault(); this._press(ctx); });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _press(ctx) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || !c.started || c.ended) return;
+    const now = ctx.now();
+    if (now < st.startAt || now > st.endAt) return;
+    if (now - c.lastPress < SYNC_CD) return; // 연타 방지 쿨타임
+    c.lastPress = now;
+    c.myPresses.push(now);
+    // 시각 피드백: 누름 점 표시
+    const dot = document.createElement("span");
+    dot.className = "sync-dot"; c.pressesEl.appendChild(dot);
+    if (c.pressesEl.childElementCount > 40) c.pressesEl.removeChild(c.pressesEl.firstChild);
+    c.btn.classList.remove("sync-pop"); void c.btn.offsetWidth; c.btn.classList.add("sync-pop");
+    sfx.click();
+    if (now - c.lastWrite > 300) { c.lastWrite = now; ctx.writeInput({ ts: c.myPresses.slice(-80) }); }
+    this._recompute(ctx);
+  },
+
+  _recompute(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const inputs = ctx.inputs() || {};
+    const others = Object.entries(inputs).filter(([pid, v]) => pid !== ctx.uid && v.ts);
+    let sc = 0, lastSynced = null;
+    for (const pt of c.myPresses) {
+      let synced = false;
+      for (const [, v] of others) { if (v.ts.some(ot => Math.abs(ot - pt) <= SYNC_WIN)) { synced = true; break; } }
+      sc += synced ? 1 : -1;
+      lastSynced = synced;
+    }
+    if (sc !== c.score) {
+      c.score = sc;
+      if (c.scoreEl) c.scoreEl.textContent = sc;
+    }
+    if (lastSynced !== null && c.myPresses.length) {
+      c.fbEl.textContent = lastSynced ? "동기화 성공! ✨ +1" : "혼자 눌렀다… -1 😢";
+      c.fbEl.className = "sync-feedback " + (lastSynced ? "sync-good" : "sync-bad");
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.btn.disabled = false; c.countEl.textContent = ""; gameStartFx(); }
+    // 남들 누름이 도착하면 내 점수 재계산 (라이브 추정)
+    this._recompute(ctx);
+    if (!c.ended) {
+      const remain = Math.max(0, Math.ceil((st.endAt - t) / 1000));
+      c.countEl.textContent = remain + "초";
+      if (t > st.endAt) {
+        c.ended = true;
+        c.btn.disabled = true; c.btn.textContent = "끝!!";
+        ctx.writeInput({ ts: c.myPresses.slice(-80) }); // 최종 확정 기록
+        sfx.whistle();
+      }
+    }
+  },
+
+  onState() {}, onInputs(inputs, ctx) { this._recompute(ctx); },
+  hostEarlyEnd(ctx, inputs, state) {
+    return state && state.endAt && ctx.now() > state.endAt + 700 ? 1200 : false;
+  },
+  evaluate(ctx, inputs, state) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const score = syncScores(players, inputs);
+    const played = players.filter(p => inputs[p] && inputs[p].ts && inputs[p].ts.length)
+      .sort((a, b) => score[b] - score[a]);
+    return tierOutcome(ctx, played, pid => (score[pid] > 0 ? "+" : "") + score[pid] + "점", "한 번도 안 눌렀다… 💤", pid => score[pid]);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -5009,5 +5141,16 @@ quiz.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz };
+syncbtn.demo = () => {
+  const d = dmStage("dm-sync");
+  d.appendChild(dmAt(dmChar(0, "dm-sy-a", 40), "32%", "34%"));
+  d.appendChild(dmAt(dmChar(1, "dm-sy-b", 40), "68%", "34%"));
+  d.appendChild(dmAt(dmProp("dm-sy-tapa", "👆"), "32%", "58%"));
+  d.appendChild(dmAt(dmProp("dm-sy-tapb", "👆"), "68%", "58%"));
+  d.appendChild(dmAt(dmProp("dm-sy-plus", "동시! +1"), "50%", "8%"));
+  d.appendChild(dmAt(dmProp("dm-sy-hint", "남이랑 동시에 누르면 +1"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "typing", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, typing, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn };

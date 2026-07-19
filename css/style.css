@@ -1198,6 +1198,12 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmMaAns { 0%, 25% { opacity: 0; } 35%, 90% { opacity: 1; } 100% { opacity: 0; } }
 .dm-ma-hint { font-size: 0.95rem; color: var(--ink-soft); }
 
+/* 눈치 버튼: 동시에 누르면 +1 */
+.dm-sy-tapa { font-size: 1.5rem; animation: dmMTap 1.2s ease-in-out infinite; }
+.dm-sy-tapb { font-size: 1.5rem; animation: dmMTap 1.2s ease-in-out infinite; }
+.dm-sy-plus { font-size: 1rem; color: var(--green); font-weight: 700; opacity: 0; animation: dmRpWin 1.2s infinite; }
+.dm-sy-hint { font-size: 0.92rem; color: var(--ink-soft); }
+
 /* 스피드 퀴즈: 4지선다 빨리 */
 .dm-qz-q { font-size: 1.4rem; font-weight: 700; }
 .dm-qz-o { width: 46px; height: 34px; border: 2.5px solid var(--ink); border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 1.1rem; }
@@ -1480,6 +1486,18 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 .quiz-opt.quiz-dim { opacity: 0.55; }
 .quiz-opt.quiz-right { outline: 4px solid var(--green); outline-offset: 2px; }
 .quiz-opt.quiz-wrong { opacity: 0.4; }
+
+/* ── 눈치 버튼! ───────────────────────────── */
+.sync-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1rem; min-height: 0; padding-top: 0.4rem; }
+.sync-top { display: flex; gap: 0.9rem; align-items: center; }
+.sync-feedback { font-size: clamp(1.3rem, 6vw, 1.9rem); font-weight: 700; text-align: center; min-height: 1.4em; color: var(--ink-soft); }
+.sync-feedback.sync-good { color: var(--green); animation: vcRowPop 0.35s cubic-bezier(0.2,1.8,0.4,1); }
+.sync-feedback.sync-bad { color: var(--red); }
+.sync-presses { flex: 1; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; justify-content: center; padding: 0.5rem; max-width: 90%; overflow: hidden; }
+.sync-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--blue); border: 2px solid var(--ink); animation: syncDot 0.3s cubic-bezier(0.2,1.8,0.4,1); }
+@keyframes syncDot { from { transform: scale(0); } }
+.btn-action.sync-pop { animation: syncBtnPop 0.12s ease-out; }
+@keyframes syncBtnPop { 0% { transform: scale(0.9); } 100% { transform: scale(1); } }
 
 /* 감정표현 애니메이션 — 모션 클래스(.char.m-*)보다 뒤에 선언해야 우선 적용됨 */
 .char.em-spin .char-box {

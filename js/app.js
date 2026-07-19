@@ -943,7 +943,7 @@ const GAME_SHORT = {
   whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
-  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈"
+  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1425,6 +1425,15 @@ function botDrive() {
       if (state && state.sub === "ask" && state.qStart && t > state.qStart + 700 && (!inp || inp.a === undefined)) {
         if (Math.random() < 0.35) {
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { a: Math.floor(Math.random() * 4), t: Math.round(t - state.qStart) });
+        }
+      }
+    } else if (g === "syncbtn") {
+      if (state && state.startAt && t > state.startAt && t < state.endAt) {
+        const ts = (inp && inp.ts) || [];
+        const last = ts.length ? ts[ts.length - 1] : 0;
+        if (t - last > 400 + Math.random() * 700) {
+          ts.push(t);
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { ts: ts.slice(-80) });
         }
       }
     } else if (g === "mugunghwa") {
