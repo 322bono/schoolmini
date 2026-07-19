@@ -6,6 +6,7 @@ import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, pl
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
 import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
 import { showSideRails, showInterstitial } from "./ads.js";
+import { initDebug } from "./debug.js";
 
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -1550,6 +1551,106 @@ $("btnAgain").addEventListener("click", async () => {
 setupMascot();
 setBgm(true); // 첫 화면(홈)부터 BGM — 실제 재생은 첫 터치 후 시작됨
 showSideRails(curScreen === "scr-home"); // 초기 홈은 이미 활성 상태라 showScreen이 안 불림 → 여기서 한 번
+
+// ── 개발자용 디버그 모드 ──────────────────────────
+// 모든 동작은 "내가 방장인 내 방"에만 적용되는 평소 방장 권한의 단축키일 뿐.
+// 게임 규칙/점수/일반 사용자에겐 일절 영향 없음 (debug.js 참고).
+const debugApi = {
+  GAMES, GAME_IDS,
+  toast,
+  get: () => ({ room, meta, isHost, UID, players: playersCache, game: gameCache, curScreen }),
+  addBots: (n) => window.__sm.addBots(n),
+  clearBots: () => window.__sm.clearBots(),
+  async testRoom() {
+    if (room) { toast("이미 방에 있어! 먼저 나가줘", true); return; }
+    const nick = localStorage.getItem("sm_nick") || "개발자";
+    const code = await net.createRoom(nick, {});
+    enterRoom(code);
+    await sleep(400);
+    await window.__sm.addBots(3);
+  },
+  _requireHost() {
+    if (!room || !meta) { toast("먼저 방에 들어가!", true); return false; }
+    if (!isHost) { toast("방장만 가능해 (지금 넌 방장이 아님)", true); return false; }
+    return true;
+  },
+  async startGame(gameId, { spicy = false, skipAnim = false } = {}) {
+    if (!this._requireHost() || !GAMES[gameId]) return;
+    const cur = (meta.curRound && meta.curRound >= 1) ? meta.curRound : 1;
+    const seq = (meta.seq && meta.seq.length) ? meta.seq.slice() : GAME_IDS.slice();
+    seq[(cur - 1) % seq.length] = gameId; // 현재 라운드 게임만 교체 (뒤 라운드는 그대로)
+    endedRounds.delete(cur);
+    const upd = {
+      "meta/status": "playing", "meta/curRound": cur,
+      "meta/rounds": Math.max(meta.rounds || 4, cur),
+      "meta/seq": seq, "meta/curGame": gameId, "meta/spicy": !!spicy,
+      "meta/timeout": null, game: null
+    };
+    if (skipAnim) {
+      const g = GAMES[gameId];
+      const t0 = net.now() + 300;
+      upd["meta/phase"] = "play";
+      upd["meta/playStart"] = t0;
+      upd["meta/phaseEnd"] = t0 + g.duration(Object.keys(playersCache).length);
+      upd.game = { state: g.hostSetup(makeCtx({ playStart: t0 })) };
+    } else {
+      upd["meta/phase"] = spicy ? "spicy" : "slot";
+      upd["meta/phaseEnd"] = net.now() + (spicy ? SPICY_MS : SLOT_MS);
+    }
+    await net.dbUpdate(`rooms/${room}`, upd);
+  },
+  async jump(phase) {
+    if (!this._requireHost()) return;
+    if (phase === "play") { endedRounds.delete(meta.curRound); return hostStartPlay(); }
+    if (phase === "result") {
+      if (meta.phase !== "play") { toast("플레이 중일 때만 결과로 갈 수 있어", true); return; }
+      endedRounds.delete(meta.curRound); return hostEndPlay(false);
+    }
+    const dur = phase === "spicy" ? SPICY_MS : phase === "slot" ? SLOT_MS : INTRO_MS;
+    const patch = { status: "playing", phase, phaseEnd: net.now() + dur };
+    if (phase === "spicy") patch.spicy = true;
+    if (!meta.curGame) patch.curGame = GAME_IDS[0];
+    await net.dbUpdate(`rooms/${room}/meta`, patch);
+  },
+  async nextRound() { if (this._requireHost()) await hostAfterResult(); },
+  async toFinal() {
+    if (!this._requireHost()) return;
+    await net.dbUpdate(`rooms/${room}`, { "meta/status": "final", "meta/phase": null, "meta/timeout": null });
+  },
+  async spicyRound(gameId) {
+    if (!this._requireHost()) return;
+    const g = gameId || meta.curGame || GAME_IDS[Math.floor(Math.random() * GAME_IDS.length)];
+    const cur = (meta.curRound && meta.curRound >= 1) ? meta.curRound : 1;
+    const seq = (meta.seq && meta.seq.length) ? meta.seq.slice() : GAME_IDS.slice();
+    seq[(cur - 1) % seq.length] = g;
+    endedRounds.delete(cur);
+    await net.dbUpdate(`rooms/${room}`, {
+      "meta/status": "playing", "meta/curRound": cur, "meta/rounds": Math.max(meta.rounds || 4, cur),
+      "meta/seq": seq, "meta/curGame": g, "meta/spicy": true,
+      "meta/phase": "spicy", "meta/phaseEnd": net.now() + SPICY_MS, "meta/timeout": null, game: null
+    });
+  },
+  async setSpicy(v) { if (this._requireHost()) await net.dbUpdate(`rooms/${room}/meta`, { spicy: !!v }); },
+  async setRounds(delta) {
+    if (!this._requireHost()) return;
+    await net.dbUpdate(`rooms/${room}/meta`, { rounds: Math.max(1, Math.min(10, (meta.rounds || 4) + delta)) });
+  },
+  async randomScores() {
+    if (!this._requireHost()) return;
+    const up = {};
+    for (const pid of realIds()) up[`players/${pid}/score`] = Math.floor(Math.random() * 24) - 4;
+    await net.dbUpdate(`rooms/${room}`, up);
+    toast("점수 랜덤 세팅 완료");
+  },
+  async backToLobby() {
+    if (!this._requireHost()) return;
+    await net.dbUpdate(`rooms/${room}`, {
+      "meta/status": "lobby", "meta/phase": null, "meta/curRound": 0,
+      game: null, history: null, "meta/timeout": null, "meta/spicy": null
+    });
+  }
+};
+initDebug(debugApi);
 
 // 부팅: 익명 로그인 → QR 링크(?join=코드)면 코드 채워진 참가 화면 → 아니면 이전 방 자동 복귀
 (async () => {
