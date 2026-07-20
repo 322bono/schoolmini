@@ -4910,7 +4910,7 @@ const slot = {
           <span class="wa-count" id="slotCount"></span>
         </div>
         <div class="slot-machine">
-          <div class="slot-reel" id="slotReel">🎰</div>
+          <div class="slotm-reel" id="slotmReel">🎰</div>
         </div>
         <div class="slot-result" id="slotResult">돌려서 운을 시험해봐!</div>
         <div class="slot-lead" id="slotLead"></div>
@@ -4921,7 +4921,7 @@ const slot = {
       </div>`;
     c.scoreEl = stage.querySelector("#slotScore");
     c.countEl = stage.querySelector("#slotCount");
-    c.reelEl = stage.querySelector("#slotReel");
+    c.reelEl = stage.querySelector("#slotmReel");
     c.resultEl = stage.querySelector("#slotResult");
     c.leadEl = stage.querySelector("#slotLead");
     c.picker = stage.querySelector("#slotPicker");
@@ -4946,7 +4946,7 @@ const slot = {
     c.spinStart = performance.now();
     c.result = slotRoll();
     c.btn.disabled = true;
-    c.reelEl.className = "slot-reel slot-spinning";
+    c.reelEl.className = "slotm-reel slot-spinning";
     c.resultEl.textContent = "두구두구…";
     c.resultEl.className = "slot-result";
     sfx.tick();
@@ -4975,7 +4975,7 @@ const slot = {
     if (this._out(ctx)[ctx.uid] && !c.elimShown) {
       c.elimShown = true;
       c.spinning = false;
-      c.reelEl.textContent = "☠️"; c.reelEl.className = "slot-reel s-bust";
+      c.reelEl.textContent = "☠️"; c.reelEl.className = "slotm-reel s-bust";
       c.resultEl.textContent = "누군가에게 탈락당했다… 구경모드"; c.resultEl.className = "slot-result s-bust";
       c.btn.disabled = true; c.btn.textContent = "탈락…";
       this._hidePicker();
@@ -4991,7 +4991,7 @@ const slot = {
       } else {
         c.spinning = false;
         c.reelEl.textContent = c.result.sym;
-        c.reelEl.className = "slot-reel " + c.result.cls + " slot-land";
+        c.reelEl.className = "slotm-reel " + c.result.cls + " slot-land";
         this._land(ctx, c.result);
       }
     }
@@ -5004,7 +5004,7 @@ const slot = {
       if (now > st.endAt) {
         c.ended = true;
         if (!this._out(ctx)[ctx.uid]) { c.btn.disabled = true; c.btn.textContent = "끝!!"; }
-        c.reelEl.className = "slot-reel";
+        c.reelEl.className = "slotm-reel";
         c.resultEl.textContent = `끝! 내 최종 ${myScore}점`;
         this._hidePicker();
         sfx.whistle();
@@ -5106,7 +5106,7 @@ const slot = {
       if (!this._c) return;
       const st = ctx.state();
       if (c.btn && !c.ended && !this._out(ctx)[ctx.uid] && st && ctx.now() < st.endAt) { c.btn.disabled = false; }
-      if (c.reelEl) c.reelEl.className = "slot-reel";
+      if (c.reelEl) c.reelEl.className = "slotm-reel";
     }, 700);
   },
 
