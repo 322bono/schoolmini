@@ -244,7 +244,7 @@ function enterRoom(code) {
   $("btnEntryGo").disabled = false;
   lastPhaseKey = "";
   lastStatus = "";
-  finalShown = false; finalSig = "";
+  finalShown = false; finalSig = ""; raceAnimating = false;
   endedRounds = new Set();
 
   unsubs.push(net.dbWatch(`rooms/${code}/meta`, v => { meta = v; onMeta(); }));
@@ -1725,7 +1725,7 @@ $("btnFinalLeave").addEventListener("click", () => { sfx.click(); leaveToHome();
 $("btnAgain").addEventListener("click", async () => {
   if (!isHost) return;
   sfx.click();
-  finalShown = false; finalSig = "";
+  finalShown = false; finalSig = ""; raceAnimating = false;
   const updates = { "meta/status": "lobby", "meta/phase": null, "meta/curRound": 0, game: null, history: null, "meta/timeout": null, "meta/spicy": null };
   for (const pid of Object.keys(playersCache)) updates[`players/${pid}/score`] = 0;
   await net.dbUpdate(`rooms/${room}`, updates);
