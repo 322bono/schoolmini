@@ -943,7 +943,8 @@ const GAME_SHORT = {
   whack: "두더지", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
-  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼", slot: "슬롯"
+  bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼", slot: "슬롯",
+  stock: "주식", combo: "콤보"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1398,6 +1399,7 @@ function botIds() { return Object.keys(playersCache).filter(id => id.startsWith(
 
 let botLastMove = 0;
 const slotBotNext = {}; // 슬롯머신 봇별 다음 스핀 시각
+const comboBotNext = {}; // 콤보 봇별 다음 탭 시각
 function botDrive() {
   if (!isHost || !room || !meta || meta.phase !== "play") return;
   const nowMs = Date.now();
@@ -1547,6 +1549,25 @@ function botDrive() {
           slotBotNext[pid] = t + 2000 + Math.random() * 1600;
           const d = Math.random() < 0.5 ? 1 : Math.random() < 0.65 ? -1 : Math.random() < 0.5 ? 3 : -3;
           net.dbTxn(`rooms/${room}/game/scores/${pid}`, cur => (cur || 0) + d).catch(() => {});
+        }
+      }
+    } else if (g === "stock") {
+      // 봇: 랜덤 타이밍에 한 번 매수→매도한 셈 치고 수익률 기록
+      if (state && state.startAt && t > state.startAt + 1800 && t < state.endAt && !inp) {
+        if (Math.random() < 0.05) {
+          const score = 76 + Math.floor(Math.random() * 66); // 76~141%
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { score, bp: 1000, sp: score * 10 });
+        }
+      }
+    } else if (g === "combo") {
+      // 봇: 주기적으로 콤보 점수 누적 (실력 랜덤)
+      if (state && state.startAt && t > state.startAt && t < state.endAt) {
+        if (t >= (comboBotNext[pid] || 0)) {
+          comboBotNext[pid] = t + 450 + Math.random() * 850;
+          const cur = (inp && inp.score) || 0;
+          const gain = 1 + Math.floor(Math.random() * 4);
+          const best = Math.max((inp && inp.best) || 0, gain);
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { score: cur + gain, best });
         }
       }
     } else if (g === "mugunghwa") {

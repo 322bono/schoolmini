@@ -4943,6 +4943,365 @@ const slot = {
 };
 
 // ═════════════════════════════════════════════
+// 주식 개미전쟁! (실시간 차트 매수/매도)
+// ═════════════════════════════════════════════
+const STOCK_LEAD = 3000, STOCK_DUR = 22000, STOCK_BASE = 1000, STOCK_STEP = 340;
+
+// 시드로 22초짜리 가격 곡선 생성 — 모든 클라가 동일한 차트를 봄 (매수/매도가 공정)
+function stockPath(seed) {
+  const rng = mulberry32(seed);
+  const steps = Math.ceil(STOCK_DUR / STOCK_STEP) + 3;
+  const events = [];
+  const nEv = 3 + Math.floor(rng() * 2);
+  for (let i = 0; i < nEv; i++) {
+    const at = Math.floor((0.14 + 0.72 * rng()) * STOCK_DUR);
+    const pump = rng() < 0.5;
+    events.push({ at, type: pump ? "pump" : "crash", mult: pump ? 1.26 + rng() * 0.3 : 0.62 + rng() * 0.16 });
+  }
+  events.sort((a, b) => a.at - b.at);
+  const fired = events.map(() => false);
+  const prices = [STOCK_BASE];
+  let p = STOCK_BASE;
+  for (let i = 1; i < steps; i++) {
+    const t = i * STOCK_STEP;
+    p *= 1 + (rng() - 0.47) * 0.055;
+    for (let e = 0; e < events.length; e++) if (!fired[e] && t >= events[e].at) { p *= events[e].mult; fired[e] = true; }
+    p = Math.max(280, Math.min(3400, p));
+    prices.push(Math.round(p));
+  }
+  return { prices, events };
+}
+function stockPriceAt(prices, tMs) {
+  if (tMs <= 0) return prices[0];
+  const f = tMs / STOCK_STEP, i = Math.floor(f);
+  if (i >= prices.length - 1) return prices[prices.length - 1];
+  return prices[i] + (prices[i + 1] - prices[i]) * (f - i);
+}
+
+const stock = {
+  id: "stock",
+  name: "주식 개미전쟁!",
+  tag: "싸게 사서 비싸게 팔아라!",
+  desc: "실시간으로 출렁이는 차트! <b>매수</b>로 사고 <b>매도</b>로 팔아 💹<br>산 값 대비 판 값이 <b>수익률</b> = 점수! 떡상 노리다 <b>떡락</b> 조심!<br>수익률 <b>상위 30% +1</b> · 중간 30% <b>0</b> · 나머지 <b>-1</b>!",
+
+  stampOnTimeout: false,
+  duration: () => STOCK_LEAD + STOCK_DUR + 3000,
+  hostSetup(ctx) {
+    const seed = Math.floor(Math.random() * 1e9);
+    const startAt = ctx.playStart + STOCK_LEAD;
+    return { seed, startAt, endAt: startAt + STOCK_DUR };
+  },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, ended: false,
+      phase: "watch", buyPrice: 0, score: 0, path: null, events: null, evShown: -1
+    };
+    stage.innerHTML = `
+      <div class="stk-wrap">
+        <div class="stk-top">
+          <span class="sketch hud-chip" id="stkStatus">관망 중…</span>
+          <span class="wa-count" id="stkCount"></span>
+        </div>
+        <div class="stk-price" id="stkPrice">₩1,000</div>
+        <div class="stk-chart">
+          <svg id="stkSvg" viewBox="0 0 100 60" preserveAspectRatio="none">
+            <polyline id="stkLine" fill="none" stroke="#2e9e3f" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" points=""/>
+            <line id="stkBuyLine" x1="0" x2="100" y1="30" y2="30" stroke="#3b6fd4" stroke-width="0.7" stroke-dasharray="1.4 1.2" style="display:none"/>
+          </svg>
+          <div class="stk-event" id="stkEvent"></div>
+        </div>
+      </div>`;
+    const btn = actionBtn(dock, "매수! 📈");
+    btn.disabled = true;
+    c.btn = btn;
+    c.statusEl = stage.querySelector("#stkStatus");
+    c.countEl = stage.querySelector("#stkCount");
+    c.priceEl = stage.querySelector("#stkPrice");
+    c.line = stage.querySelector("#stkLine");
+    c.buyLine = stage.querySelector("#stkBuyLine");
+    c.eventEl = stage.querySelector("#stkEvent");
+    btn.addEventListener("click", () => this._act(ctx));
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _ensurePath(ctx) {
+    const c = this._c, st = ctx.state();
+    if (c.path || !st || st.seed === undefined) return;
+    const r = stockPath(st.seed);
+    c.path = r.prices; c.events = r.events;
+  },
+
+  _act(ctx) {
+    const c = this._c, st = ctx.state();
+    if (!c || !st || !c.started || c.ended || !c.path) return;
+    const t = ctx.now();
+    if (t < st.startAt || t > st.endAt) return;
+    const price = stockPriceAt(c.path, t - st.startAt);
+    if (c.phase === "watch") {
+      c.phase = "holding"; c.buyPrice = price;
+      c.btn.textContent = "매도! 📉";
+      c.statusEl.innerHTML = `매수가 <b>₩${Math.round(price).toLocaleString()}</b>`;
+      c.buyLine.style.display = "";
+      sfx.coin(); vibrate(30);
+    } else if (c.phase === "holding") {
+      c.phase = "done";
+      const score = Math.round(price / c.buyPrice * 100);
+      c.score = score;
+      const pct = score - 100;
+      c.btn.disabled = true; c.btn.textContent = "확정!";
+      c.statusEl.innerHTML = `확정 <b>${pct >= 0 ? "+" : ""}${pct}%</b>`;
+      c.statusEl.className = "sketch hud-chip " + (pct >= 0 ? "stk-up" : "stk-down");
+      ctx.writeInput({ score, bp: Math.round(c.buyPrice), sp: Math.round(price) });
+      if (pct >= 0) { sfx.win(); sfx.coin(); } else sfx.fail();
+      vibrate(120);
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    this._ensurePath(ctx);
+    if (!c.path) return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) {
+      c.started = true; c.countEl.textContent = "";
+      if (c.phase === "watch") c.btn.disabled = false;
+      gameStartFx();
+    }
+    const el = Math.min(STOCK_DUR, t - st.startAt);
+    const price = stockPriceAt(c.path, el);
+    this._renderPrice(price);
+    this._renderChart(el, price);
+    this._renderEvents(el);
+    if (!c.ended) {
+      const remain = Math.max(0, st.endAt - t);
+      const txt = Math.ceil(remain / 1000) + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      if (t >= st.endAt) {
+        c.ended = true; c.btn.disabled = true; c.btn.textContent = "장 마감!";
+        if (c.phase === "holding") {
+          const score = Math.round(price / c.buyPrice * 100), pct = score - 100;
+          c.score = score;
+          c.statusEl.innerHTML = `강제청산 <b>${pct >= 0 ? "+" : ""}${pct}%</b>`;
+          ctx.writeInput({ score, bp: Math.round(c.buyPrice), sp: Math.round(price), forced: 1 });
+        } else if (c.phase === "watch") {
+          c.statusEl.textContent = "관망만 했다… 💤";
+        }
+        sfx.whistle();
+      }
+    }
+  },
+
+  _renderPrice(price) {
+    const c = this._c, up = price >= STOCK_BASE;
+    c.priceEl.textContent = "₩" + Math.round(price).toLocaleString();
+    c.priceEl.classList.toggle("stk-up", up);
+    c.priceEl.classList.toggle("stk-down", !up);
+  },
+
+  _renderChart(el, price) {
+    const c = this._c;
+    if (!c.path) return;
+    const nPts = 56, pts = [];
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i <= nPts; i++) {
+      const p = stockPriceAt(c.path, el * (i / nPts));
+      pts.push(p); if (p < min) min = p; if (p > max) max = p;
+    }
+    if (c.phase === "holding" && c.buyPrice) { min = Math.min(min, c.buyPrice); max = Math.max(max, c.buyPrice); }
+    const pad = (max - min) * 0.14 + 1; min -= pad; max += pad;
+    const y = v => 57 - (v - min) / (max - min) * 54;
+    c.line.setAttribute("points", pts.map((p, i) => (i / nPts * 100).toFixed(1) + "," + y(p).toFixed(1)).join(" "));
+    c.line.setAttribute("stroke", price >= STOCK_BASE ? "#2e9e3f" : "#e0472f");
+    if (c.phase === "holding" && c.buyPrice) {
+      const by = y(c.buyPrice).toFixed(1);
+      c.buyLine.setAttribute("y1", by); c.buyLine.setAttribute("y2", by);
+    }
+  },
+
+  _renderEvents(el) {
+    const c = this._c;
+    if (!c.events) return;
+    for (let i = 0; i < c.events.length; i++) {
+      const e = c.events[i];
+      if (i > c.evShown && el >= e.at && el < e.at + 1600) {
+        c.evShown = i;
+        c.eventEl.textContent = e.type === "pump" ? "📈 떡상!!" : "📉 떡락!!";
+        c.eventEl.className = "stk-event show " + (e.type === "pump" ? "stk-up" : "stk-down");
+        if (e.type === "pump") sfx.sparkle(); else { sfx.boom(); vibrate(80); }
+        setTimeout(() => { if (c.eventEl) c.eventEl.className = "stk-event"; }, 1200);
+      }
+    }
+  },
+
+  onState() {}, onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || typeof state.startAt !== "number") return false;
+    if (ctx.now() > state.endAt + 800) return 1400;
+    const players = Object.keys(ctx.players());
+    const allDone = players.length > 0 && players.every(pid => inputs && inputs[pid] && typeof inputs[pid].score === "number");
+    return allDone ? 1400 : false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const played = players
+      .filter(p => inputs[p] && typeof inputs[p].score === "number")
+      .sort((a, b) => inputs[b].score - inputs[a].score);
+    return tierOutcome(ctx, played, pid => {
+      const pct = inputs[pid].score - 100;
+      return (pct >= 0 ? "+" + pct : "" + pct) + "%";
+    }, "관망만… 💤", pid => inputs[pid].score);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 정확 타이밍 콤보! (움직이는 게이지 타이밍)
+// ═════════════════════════════════════════════
+const COMBO_LEAD = 3500, COMBO_DUR = 15000;
+
+const combo = {
+  id: "combo",
+  name: "정확 타이밍 콤보!",
+  tag: "초록칸에서 딱! 콤보를 쌓아라!",
+  desc: "좌우로 튕기는 바늘이 <b>초록칸</b>에 왔을 때 딱 누르기! ✨<br>성공하면 <b>콤보</b>가 쌓여 점수 급상승 (칸은 좁아지고 더 빨라짐)!<br>빗나가면 콤보 리셋! 총점 <b>상위 30% +1</b> · 중간 <b>0</b> · 나머지 <b>-1</b>!",
+
+  stampOnTimeout: false,
+  duration: () => COMBO_LEAD + COMBO_DUR + 2500,
+  hostSetup(ctx) { const startAt = ctx.playStart + COMBO_LEAD; return { startAt, endAt: startAt + COMBO_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = {
+      lastCount: -1, started: false, ended: false,
+      pos: 0.5, speed: 0.62, phase: 0, zoneC: 0.5, zoneH: 0.16,
+      combo: 0, best: 0, score: 0, lastWrite: 0
+    };
+    stage.innerHTML = `
+      <div class="cmb-wrap">
+        <div class="cmb-top">
+          <span class="sketch hud-chip">점수 <b id="cmbScore">0</b></span>
+          <span class="wa-count" id="cmbCount"></span>
+        </div>
+        <div class="cmb-combo" id="cmbCombo"></div>
+        <div class="cmb-bar" id="cmbBar">
+          <div class="cmb-zone" id="cmbZone"></div>
+          <div class="cmb-marker" id="cmbMarker"></div>
+        </div>
+        <div class="cmb-fx" id="cmbFx"></div>
+      </div>`;
+    const btn = actionBtn(dock, "딱!");
+    btn.disabled = true;
+    c.btn = btn;
+    c.scoreEl = stage.querySelector("#cmbScore");
+    c.countEl = stage.querySelector("#cmbCount");
+    c.comboEl = stage.querySelector("#cmbCombo");
+    c.zoneEl = stage.querySelector("#cmbZone");
+    c.markerEl = stage.querySelector("#cmbMarker");
+    c.fxEl = stage.querySelector("#cmbFx");
+    c.markerEl.style.left = "50%";
+    this._placeZone();
+    c.btn.addEventListener("pointerdown", e => { e.preventDefault(); this._tap(ctx); });
+    c.stopLoop = gameLoop((t, dt) => this._tick(ctx, dt));
+  },
+
+  _placeZone() {
+    const c = this._c;
+    c.zoneC = 0.12 + Math.random() * 0.76;
+    c.zoneH = Math.max(0.045, 0.17 - c.combo * 0.007);
+    c.zoneEl.style.left = ((c.zoneC - c.zoneH) * 100) + "%";
+    c.zoneEl.style.width = (c.zoneH * 2 * 100) + "%";
+  },
+
+  _flash(txt, cls) {
+    const c = this._c;
+    c.fxEl.textContent = txt;
+    c.fxEl.className = "cmb-fx show " + cls;
+    setTimeout(() => { if (c.fxEl) c.fxEl.className = "cmb-fx"; }, 480);
+  },
+
+  _tap(ctx) {
+    const c = this._c;
+    if (!c || !c.started || c.ended) return;
+    const hit = Math.abs(c.pos - c.zoneC) <= c.zoneH;
+    if (hit) {
+      c.combo++; c.score += c.combo;
+      if (c.combo > c.best) c.best = c.combo;
+      c.speed = Math.min(2.4, c.speed + 0.05);
+      c.scoreEl.textContent = c.score;
+      c.comboEl.textContent = c.combo >= 2 ? c.combo + " COMBO!" : "";
+      c.comboEl.className = "cmb-combo show" + (c.combo >= 8 ? " hot" : "");
+      this._flash("PERFECT!", "hit");
+      sfx.correct(); if (c.combo >= 5) sfx.sparkle();
+      vibrate(20);
+    } else {
+      this._flash(c.combo >= 3 ? "MISS" : "", "miss");
+      c.combo = 0;
+      c.speed = Math.max(0.62, c.speed - 0.5);
+      c.comboEl.className = "cmb-combo";
+      sfx.wrong();
+      c.markerEl.classList.remove("cmb-shake"); void c.markerEl.offsetWidth; c.markerEl.classList.add("cmb-shake");
+    }
+    this._placeZone();
+    const t = ctx.now();
+    if (t - c.lastWrite > 380) { c.lastWrite = t; ctx.writeInput({ score: c.score, best: c.best }); }
+  },
+
+  _tick(ctx, dt) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; c.btn.disabled = false; gameStartFx(); }
+    if (c.ended) return;
+    c.phase += c.speed * dt;
+    c.pos = Math.abs((c.phase % 1) * 2 - 1);
+    c.markerEl.style.left = (c.pos * 100) + "%";
+    const remain = Math.max(0, st.endAt - t);
+    const txt = Math.ceil(remain / 1000) + "초";
+    if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+    if (t >= st.endAt) {
+      c.ended = true;
+      c.btn.disabled = true; c.btn.textContent = "끝!";
+      c.comboEl.textContent = `최고 ${c.best}콤보!`;
+      c.comboEl.className = "cmb-combo show";
+      ctx.writeInput({ score: c.score, best: c.best });
+      sfx.whistle();
+    }
+  },
+
+  onState() {}, onInputs() {},
+  hostEarlyEnd(ctx, inputs, state) {
+    if (state && typeof state.startAt === "number" && ctx.now() > state.endAt + 800) return 1500;
+    return false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const played = players.filter(p => inputs[p] && typeof inputs[p].score === "number" && inputs[p].score > 0)
+      .sort((a, b) => inputs[b].score - inputs[a].score);
+    return tierOutcome(ctx, played, pid => `${inputs[pid].score}점 (${inputs[pid].best || 0}콤보)`, "가만히 있었다… 💤", pid => inputs[pid].score);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -5223,5 +5582,28 @@ slot.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn", "slot"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn, slot };
+stock.demo = () => {
+  const d = dmStage("dm-stock");
+  const chart = dmAt(dmProp("dm-st-chart"), "50%", "12%");
+  chart.innerHTML = `<svg viewBox="0 0 100 44" preserveAspectRatio="none"><polyline class="dm-st-line" fill="none" points="2,34 18,26 34,30 50,14 66,22 82,6 98,10"/></svg>`;
+  d.appendChild(chart);
+  d.appendChild(dmAt(dmProp("dm-st-buy", "매수"), "34%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-st-sell", "매도 +52%!"), "66%", "62%"));
+  d.appendChild(dmAt(dmProp("dm-st-hint", "싸게 사서 비싸게! 떡락 조심"), "50%", "86%"));
+  return d;
+};
+
+combo.demo = () => {
+  const d = dmStage("dm-combo");
+  const bar = dmAt(dmProp("dm-cb-bar"), "50%", "34%");
+  bar.appendChild(dmProp("dm-cb-zone"));
+  bar.appendChild(dmProp("dm-cb-marker"));
+  d.appendChild(bar);
+  d.appendChild(dmAt(dmProp("dm-cb-combo", "5 COMBO!"), "50%", "10%"));
+  d.appendChild(dmAt(dmProp("dm-cb-hand", "👆"), "50%", "56%"));
+  d.appendChild(dmAt(dmProp("dm-cb-hint", "초록칸에서 딱! 콤보 폭발!"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn", "slot", "stock", "combo"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn, slot, stock, combo };

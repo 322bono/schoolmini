@@ -1579,6 +1579,53 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 }
 .slot-pick:active { transform: scale(0.94); background: var(--hl); }
 
+/* ── 주식 개미전쟁! ───────────────────────── */
+.stk-wrap { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 0.5rem; min-height: 0; padding: 0.4rem 0.6rem; }
+.stk-top { display: flex; justify-content: space-between; align-items: center; }
+.stk-price { text-align: center; font-size: clamp(2.1rem, 10vw, 3.2rem); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.stk-up { color: var(--green); }
+.stk-down { color: var(--red); }
+.stk-chart { position: relative; flex: 1; min-height: 150px; background: var(--paper-2); border: 3px solid var(--ink); border-radius: 14px; overflow: hidden; }
+.stk-chart svg { width: 100%; height: 100%; display: block; }
+.stk-event { position: absolute; top: 10%; left: 50%; transform: translateX(-50%); font-size: clamp(1.5rem, 8vw, 2.4rem); font-weight: 700; opacity: 0; pointer-events: none; white-space: nowrap; }
+.stk-event.show { animation: stkEv 1.2s cubic-bezier(0.2,1.6,0.4,1); }
+@keyframes stkEv { 0% { opacity: 0; transform: translateX(-50%) scale(0.3); } 25% { opacity: 1; transform: translateX(-50%) scale(1.15); } 75% { opacity: 1; transform: translateX(-50%) scale(1); } 100% { opacity: 0; transform: translateX(-50%) scale(1); } }
+
+/* ── 정확 타이밍 콤보! ─────────────────────── */
+.cmb-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.8rem; min-height: 0; padding-top: 0.5rem; }
+.cmb-top { display: flex; gap: 0.9rem; align-items: center; }
+.cmb-combo { font-size: clamp(1.6rem, 8vw, 2.6rem); font-weight: 700; min-height: 1.3em; color: var(--red); opacity: 0; }
+.cmb-combo.show { opacity: 1; animation: cmbPop 0.3s cubic-bezier(0.2,1.8,0.4,1); }
+.cmb-combo.hot { text-shadow: 0 0 9px rgba(224,71,47,0.55); animation: cmbHot 0.4s ease infinite alternate; }
+@keyframes cmbPop { 0% { transform: scale(0.5); } 100% { transform: scale(1); } }
+@keyframes cmbHot { 0% { transform: scale(1); } 100% { transform: scale(1.13); } }
+.cmb-bar { position: relative; width: min(92%, 560px); height: 62px; background: var(--paper-2); border: 3px solid var(--ink); border-radius: 40px; overflow: hidden; box-shadow: inset 0 -4px 0 rgba(0,0,0,0.06); }
+.cmb-zone { position: absolute; top: 8%; height: 84%; background: rgba(88,182,71,0.5); border-left: 2px solid var(--green); border-right: 2px solid var(--green); border-radius: 5px; }
+.cmb-marker { position: absolute; top: -6%; height: 112%; width: 6px; margin-left: -3px; background: var(--ink); border-radius: 3px; }
+.cmb-marker.cmb-shake { animation: cmbShake 0.25s; }
+@keyframes cmbShake { 25% { transform: translateY(-4px) rotate(-7deg); } 75% { transform: translateY(3px) rotate(7deg); } }
+.cmb-fx { font-size: clamp(1.4rem, 7vw, 2.2rem); font-weight: 700; min-height: 1.2em; opacity: 0; }
+.cmb-fx.show.hit { opacity: 1; color: var(--green); animation: cmbPop 0.35s cubic-bezier(0.2,1.8,0.4,1); }
+.cmb-fx.show.miss { opacity: 1; color: var(--red); }
+
+/* 데모: 주식 / 콤보 */
+.dm-st-chart { width: 78%; height: 46%; }
+.dm-st-chart svg { width: 100%; height: 100%; }
+.dm-st-line { fill: none; stroke: var(--green); stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 260; stroke-dashoffset: 260; animation: dmStDraw 2.6s ease infinite; }
+@keyframes dmStDraw { 0% { stroke-dashoffset: 260; } 55% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 0; } }
+.dm-st-buy { font-size: 0.9rem; font-weight: 700; color: var(--blue); background: #fff; border: 2px solid var(--ink); border-radius: 8px; padding: 2px 7px; }
+.dm-st-sell { font-size: 0.9rem; font-weight: 700; color: var(--green); background: #fff; border: 2px solid var(--ink); border-radius: 8px; padding: 2px 7px; opacity: 0; animation: dmStSell 2.6s infinite; }
+@keyframes dmStSell { 0%,55% { opacity: 0; transform: scale(0.7); } 70%,100% { opacity: 1; transform: scale(1); } }
+.dm-st-hint { font-size: 0.9rem; color: var(--ink-soft); }
+.dm-cb-bar { width: 74%; height: 24px; background: var(--paper-2); border: 3px solid var(--ink); border-radius: 20px; position: relative; overflow: hidden; }
+.dm-cb-zone { position: absolute; left: 42%; width: 16%; top: 10%; height: 80%; background: rgba(88,182,71,0.55); border-radius: 4px; }
+.dm-cb-marker { position: absolute; top: -14%; height: 128%; width: 5px; margin-left: -2.5px; background: var(--ink); border-radius: 3px; animation: dmCbMove 1.5s ease-in-out infinite alternate; }
+@keyframes dmCbMove { 0% { left: 14%; } 100% { left: 84%; } }
+.dm-cb-combo { font-size: 1.1rem; font-weight: 700; color: var(--red); }
+.dm-cb-hand { font-size: 1.5rem; animation: dmCbTap 1.5s ease infinite; }
+@keyframes dmCbTap { 0%,40%,100% { transform: scale(1); } 50% { transform: scale(0.8); } }
+.dm-cb-hint { font-size: 0.9rem; color: var(--ink-soft); }
+
 /* ── 눈치 버튼! ───────────────────────────── */
 .sync-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1rem; min-height: 0; padding-top: 0.4rem; }
 .sync-top { display: flex; gap: 0.9rem; align-items: center; }
