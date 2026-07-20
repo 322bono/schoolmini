@@ -4,7 +4,7 @@ import * as net from "./net.js";
 import { qrSvg } from "./qr.js";
 import { sfx, unlockAudio, toggleMute, isMuted, stopMelody, setBgm, playFahh, playGong, playCheer, playHit, playDrumroll, playPodiumMusic, setRoundMusic, stopRoundMusic, stopSfxTails, resumeAudio } from "./sfx.js";
 import { makeChar, setFace, setMotion, charSay } from "./character.js";
-import { GAMES, GAME_IDS, genWords, genMoles } from "./games.js";
+import { GAMES, GAME_IDS, genMoles } from "./games.js";
 import { showSideRails, showInterstitial } from "./ads.js";
 import { initDebug } from "./debug.js";
 
@@ -12,9 +12,9 @@ const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 페이즈 길이 — 너무 빠르게 넘어가지 않도록 여유 있게
-const SLOT_MS = 7800;
-const INTRO_MS = 8400;
-const SPICY_MS = 3800;
+const SLOT_MS = 4600;   // 룰렛(게임 뽑기) — 스피디하게 단축
+const INTRO_MS = 3600;  // 게임 소개 — 짧고 빠르게
+const SPICY_MS = 2800;  // 스파이시 라운드 예고
 const SPICY_CHANCE = 0.10; // 라운드마다 스파이시(점수 3배) 확률
 
 // ── 전역 상태 ────────────────────────────────
@@ -775,7 +775,7 @@ function runSlot() {
   reel.innerHTML = items.map(n => `<div class="slot-item">${n}</div>`).join("");
   const H = 108;
   const total = items.length - 1;
-  const dur = 6300;
+  const dur = 3900; // 스핀 시간 단축 — 빠르게 휙 돌고 딱!
   const DRUM_MS = 3080; // drumroll.mp3 길이 — 멈추는 순간에 딱 끝나게 시작
   const t0 = performance.now();
   let lastIdx = -1;
@@ -857,7 +857,7 @@ async function runResult(token) {
   if (meta && meta.timeout) {
     stamp.style.display = "";
     sfx.timeover();
-    await sleep(2400);
+    await sleep(1400);
     if (resultToken !== token) return;
   }
 
@@ -876,7 +876,7 @@ async function runResult(token) {
     charMap[pid] = el;
     field.appendChild(el);
   }
-  await sleep(1400);
+  await sleep(850);
   if (resultToken !== token) return;
 
   const losers = ids.filter(pid => outcome[pid] !== "win" && outcome[pid] !== "mid");
@@ -889,14 +889,14 @@ async function runResult(token) {
     const el = charMap[pid];
     setFace(el, "sad");
     setMotion(el, "cry");
-    await sleep(620);
+    await sleep(430);
     if (resultToken !== token) return;
     setMotion(el, "dissolve");
     spawnPoof(el);
     sfx.poof();
-    await sleep(520);
+    await sleep(360);
   }
-  await sleep(800);
+  await sleep(500);
   if (resultToken !== token) return;
 
   // 중간층은 그대로 (±0), 승자는 +1 한꺼번에
@@ -940,7 +940,7 @@ async function runResult(token) {
 // 게임별 짧은 이름 (점수표 헤더용)
 const GAME_SHORT = {
   nunchi: "눈치", mugunghwa: "무궁화", grab: "빨리집어", choseki: "초세기",
-  whack: "두더지", typing: "타이핑", mash: "연타", block: "블록",
+  whack: "두더지", mash: "연타", block: "블록",
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
   bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼", slot: "슬롯"
@@ -1275,7 +1275,8 @@ async function hostEndPlay(byTimer) {
   const { outcome, detail } = res;
   const losers = Object.values(outcome).filter(v => v !== "win" && v !== "mid").length;
   const showStamp = !!byTimer && g.stampOnTimeout !== false;
-  const resultMs = (showStamp ? 2800 : 1200) + 1900 + losers * 1150 + 5600;
+  // 리빌 연출 시간에 딱 맞춰 단축 (예전엔 리빌 끝나고도 ~6초 멍하니 대기 = 루즈함의 주범)
+  const resultMs = (showStamp ? 1400 : 0) + 2900 + losers * 800;
   const updates = {
     "game/outcome": outcome,
     "game/detail": detail,
@@ -1427,16 +1428,6 @@ function botDrive() {
           e >= ev.at && e < ev.at + ev.ttl && !claims[ev.i] &&
           (ev.type !== "bomb" || Math.random() < 0.15));
         if (active && Math.random() < 0.25) {
-          net.dbTxn(`rooms/${room}/game/claims/${active.i}`, cur => (cur === null ? { u: pid, t: Date.now() } : undefined)).catch(() => {});
-        }
-      }
-    } else if (g === "typing") {
-      if (state && state.seed !== undefined && state.startAt && t > state.startAt) {
-        const words = genWords(state.seed).words;
-        const e = t - state.startAt;
-        const active = words.find(w => e >= w.at && e < w.at + w.ttl && w.type !== "trap");
-        const claims = (gameCache && gameCache.claims) || {};
-        if (active && !claims[active.i] && Math.random() < 0.12) {
           net.dbTxn(`rooms/${room}/game/claims/${active.i}`, cur => (cur === null ? { u: pid, t: Date.now() } : undefined)).catch(() => {});
         }
       }
