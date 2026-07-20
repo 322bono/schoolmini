@@ -5302,6 +5302,589 @@ const combo = {
 };
 
 // ═════════════════════════════════════════════
+// 땅따먹기 전쟁! (실시간 타일 점령)
+// ═════════════════════════════════════════════
+const LAND_LEAD = 3000, LAND_DUR = 10000, LAND_COLS = 5, LAND_ROWS = 4;
+
+const land = {
+  id: "land",
+  name: "땅따먹기 전쟁!",
+  tag: "탭해서 내 땅으로! 뺏고 뺏겨라!",
+  desc: "10초 동안 타일을 마구 탭해서 <b>내 색으로</b> 점령! 🎨<br>남이 먹은 칸도 다시 탭하면 <b>뺏어온다</b> — 끝날 때 제일 많이 가진 사람 승!<br>가장 넓은 <b>상위 30% +1</b> · 중간 <b>0</b> · 나머지 <b>-1</b>!",
+
+  stampOnTimeout: false,
+  duration: () => LAND_LEAD + LAND_DUR + 2500,
+  hostSetup(ctx) { const startAt = ctx.playStart + LAND_LEAD; return { startAt, endAt: startAt + LAND_DUR, tiles: {} }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const N = LAND_COLS * LAND_ROWS;
+    const c = this._c = { lastCount: -1, started: false, ended: false, tileEls: [], owner: new Array(N).fill(null) };
+    stage.innerHTML = `
+      <div class="land-wrap">
+        <div class="land-top">
+          <span class="sketch hud-chip">내 땅 <b id="landMine">0</b>칸</span>
+          <span class="wa-count" id="landCount"></span>
+        </div>
+        <div class="land-grid" id="landGrid" style="grid-template-columns:repeat(${LAND_COLS},1fr)"></div>
+      </div>`;
+    dock.innerHTML = `<div class="game-note">🎨 빈 칸도 남의 칸도 마구 탭! 손이 빨라야 이긴다</div>`;
+    c.mineEl = stage.querySelector("#landMine");
+    c.countEl = stage.querySelector("#landCount");
+    const grid = stage.querySelector("#landGrid");
+    for (let i = 0; i < N; i++) {
+      const b = document.createElement("button");
+      b.className = "land-tile";
+      b.addEventListener("pointerdown", e => { e.preventDefault(); this._claim(ctx, i); });
+      grid.appendChild(b);
+      c.tileEls.push(b);
+    }
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _claim(ctx, i) {
+    const c = this._c;
+    if (!c || !c.started || c.ended || c.owner[i] === ctx.uid) return;
+    c.owner[i] = ctx.uid;
+    this._paint(i, ctx.uid, ctx);
+    this._updateMine(ctx);
+    ctx.writeState({ ["tiles/" + i]: ctx.uid });
+    sfx.pop();
+  },
+
+  _paint(i, uid, ctx) {
+    const el = this._c.tileEls[i];
+    if (!el) return;
+    if (uid) { el.style.background = ctx.colorOf(uid); el.classList.add("owned"); el.classList.toggle("mine", uid === ctx.uid); }
+    else { el.style.background = ""; el.classList.remove("owned", "mine"); }
+    el.classList.remove("land-pop"); void el.offsetWidth; el.classList.add("land-pop");
+  },
+
+  _updateMine(ctx) {
+    const c = this._c;
+    if (c.mineEl) c.mineEl.textContent = c.owner.filter(u => u === ctx.uid).length;
+  },
+
+  onState(state, ctx) {
+    const c = this._c;
+    if (!c || !state || !state.tiles) return;
+    for (const [k, uid] of Object.entries(state.tiles)) {
+      const i = +k;
+      if (c.owner[i] !== uid) { c.owner[i] = uid; this._paint(i, uid, ctx); }
+    }
+    this._updateMine(ctx);
+  },
+  onInputs() {},
+
+  _tick(ctx) {
+    const c = this._c;
+    if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; gameStartFx(); }
+    if (!c.ended) {
+      const remain = Math.max(0, st.endAt - t);
+      const txt = Math.ceil(remain / 1000) + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      if (t >= st.endAt) { c.ended = true; c.countEl.textContent = "끝!"; sfx.whistle(); c.tileEls.forEach(e => e.disabled = true); }
+    }
+  },
+
+  hostEarlyEnd(ctx, inputs, state) {
+    if (state && typeof state.startAt === "number" && ctx.now() > state.endAt + 700) return 1400;
+    return false;
+  },
+  evaluate(ctx, inputs, state) {
+    const players = Object.keys(ctx.players());
+    const tiles = (state && state.tiles) || {};
+    const count = {}; players.forEach(p => count[p] = 0);
+    for (const uid of Object.values(tiles)) if (count[uid] !== undefined) count[uid]++;
+    const ranked = players.slice().sort((a, b) => count[b] - count[a]);
+    return tierOutcome(ctx, ranked, pid => count[pid] + "칸", "구경만… 💤", pid => count[pid]);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 흔들기! (기기 흔들기 카운트)
+// ═════════════════════════════════════════════
+const SHAKE_LEAD = 3000, SHAKE_DUR = 10000, SHAKE_THRESH = 14, SHAKE_COOLDOWN = 90;
+
+const shake = {
+  id: "shake",
+  name: "흔들기!",
+  tag: "폰을 미친 듯이 흔들어!!",
+  desc: "카운트다운 끝나면 <b>10초</b> 동안 폰을 미친 듯이 흔들어!! 📱💨<br>(안 흔들리는 기기는 버튼 마구 탭!) 가장 많이 흔든 <b>상위 30% +1</b> · 중간 <b>0</b> · 나머지 <b>-1</b>!",
+
+  stampOnTimeout: false,
+  duration: () => SHAKE_LEAD + SHAKE_DUR + 2500,
+  hostSetup(ctx) { const startAt = ctx.playStart + SHAKE_LEAD; return { startAt, endAt: startAt + SHAKE_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, ended: false, n: 0, lastWrite: 0, lastMag: null, lastShake: 0, armed: false, map: {}, cntEls: {} };
+    stage.innerHTML = `
+      <div class="shake-top">
+        <div class="shake-num" id="shakeNum"></div>
+        <div class="shake-my sketch alt" id="shakeMy" style="display:none">내 흔들기: <b id="shakeN">0</b></div>
+      </div>
+      <div class="char-field" id="shakeField"></div>`;
+    const field = stage.querySelector("#shakeField");
+    c.numEl = stage.querySelector("#shakeNum");
+    c.myEl = stage.querySelector("#shakeMy");
+    c.nEl = stage.querySelector("#shakeN");
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 50 });
+      if (pid === ctx.uid) el.classList.add("me");
+      const cnt = document.createElement("div"); cnt.className = "mash-cnt"; cnt.textContent = "0";
+      el.appendChild(cnt);
+      c.map[pid] = el; c.cntEls[pid] = cnt;
+      field.appendChild(el);
+    }
+    const btn = actionBtn(dock, "🤳 흔들 준비!");
+    c.btn = btn;
+    c.onMotion = e => {
+      const a = e.accelerationIncludingGravity || e.acceleration; if (!a) return;
+      const mag = Math.sqrt((a.x || 0) * (a.x || 0) + (a.y || 0) * (a.y || 0) + (a.z || 0) * (a.z || 0));
+      if (c.lastMag !== null) {
+        const t2 = performance.now();
+        if (Math.abs(mag - c.lastMag) > SHAKE_THRESH && t2 - c.lastShake > SHAKE_COOLDOWN) { c.lastShake = t2; this._add(ctx); }
+      }
+      c.lastMag = mag;
+    };
+    this._armMotion(false);
+    btn.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      this._armMotion(true);
+      if (c.started && !c.ended) this._add(ctx);
+    });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _armMotion(viaGesture) {
+    const c = this._c;
+    if (!c || c.armed) return;
+    try {
+      const DME = window.DeviceMotionEvent;
+      if (DME && typeof DME.requestPermission === "function") {
+        if (!viaGesture) return;
+        DME.requestPermission().then(r => { if (r === "granted") { window.addEventListener("devicemotion", c.onMotion); c.armed = true; } }).catch(() => {});
+      } else if (DME || "ondevicemotion" in window) {
+        window.addEventListener("devicemotion", c.onMotion); c.armed = true;
+      }
+    } catch { /* noop */ }
+  },
+
+  _add(ctx) {
+    const c = this._c;
+    if (!c || !c.started || c.ended) return;
+    c.n++;
+    c.nEl.textContent = c.n;
+    c.cntEls[ctx.uid].textContent = c.n;
+    const el = c.map[ctx.uid];
+    el.classList.remove("shake-go"); void el.offsetWidth; el.classList.add("shake-go");
+    if (c.n % 3 === 0) sfx.tick();
+    const t = ctx.now();
+    if (t - c.lastWrite > 380) { c.lastWrite = t; ctx.writeInput({ n: c.n }); }
+  },
+
+  onState() {},
+  onInputs(inputs, ctx) {
+    const c = this._c; if (!c || !inputs) return;
+    for (const [pid, v] of Object.entries(inputs)) {
+      if (pid === ctx.uid) continue;
+      const cnt = c.cntEls[pid];
+      if (cnt && typeof v.n === "number" && cnt.textContent !== String(v.n)) {
+        cnt.textContent = v.n;
+        const el = c.map[pid]; el.classList.remove("shake-go"); void el.offsetWidth; el.classList.add("shake-go");
+      }
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c; if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount && n <= 3) { c.lastCount = n; c.numEl.textContent = n; c.numEl.classList.remove("fg-pop"); void c.numEl.offsetWidth; c.numEl.classList.add("fg-pop"); cdTick(); }
+      return;
+    }
+    if (!c.started) {
+      c.started = true; c.numEl.textContent = "흔들어!!!"; c.myEl.style.display = "";
+      c.btn.textContent = "🤳 흔들어!! (탭도 OK)";
+      gameStartFx();
+      setTimeout(() => { if (c.numEl) c.numEl.textContent = ""; }, 1100);
+    }
+    if (!c.ended && t > st.endAt) {
+      c.ended = true; c.btn.disabled = true; c.btn.textContent = "끝!! 손 떼!!";
+      ctx.writeInput({ n: c.n }); sfx.whistle();
+    }
+  },
+
+  hostEarlyEnd(ctx, inputs, state) {
+    if (state && typeof state.startAt === "number" && ctx.now() > state.endAt + 900) return 1500;
+    return false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const played = players.filter(p => inputs[p] && typeof inputs[p].n === "number" && inputs[p].n > 0).sort((a, b) => inputs[b].n - inputs[a].n);
+    return tierOutcome(ctx, played, pid => inputs[pid].n + "번!", "가만히 있었다… 💤", pid => inputs[pid].n);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); if (c.armed && c.onMotion) window.removeEventListener("devicemotion", c.onMotion); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 미어캣 빼꼼! (숨었다 고개 내밀기)
+// ═════════════════════════════════════════════
+const MK_LEAD = 3000, MK_DUR = 24000, MK_RATE = 15, MK_CAUGHT = 45, MK_LOCK = 950;
+
+// 시드로 안전/경고/위험 사이클 생성 (모든 클라 동일)
+function mkSchedule(seed) {
+  const rng = mulberry32(seed);
+  const segs = []; let t = 0;
+  while (t < MK_DUR) {
+    const safe = 1400 + rng() * 1900;
+    segs.push({ t0: t, t1: t + safe, type: "safe" }); t += safe;
+    const warn = 430 + rng() * 260;      // 언질(귀 쫑긋 + !)
+    segs.push({ t0: t, t1: t + warn, type: "warn" }); t += warn;
+    const danger = 900 + rng() * 950;    // 돌아봄!
+    segs.push({ t0: t, t1: t + danger, type: "danger" }); t += danger;
+  }
+  return segs;
+}
+function mkTypeAt(segs, el) {
+  for (const s of segs) if (el >= s.t0 && el < s.t1) return s.type;
+  return "safe";
+}
+
+const MEERKAT_SVG = `<svg class="mk-svg" viewBox="0 0 120 158" aria-hidden="true">
+  <path d="M80 122 q30 4 30 32" fill="none" stroke="#a9824f" stroke-width="9" stroke-linecap="round"/>
+  <ellipse cx="60" cy="107" rx="31" ry="43" fill="#c9a878" stroke="#33312e" stroke-width="3.4"/>
+  <ellipse cx="60" cy="113" rx="17" ry="31" fill="#ecdcc0"/>
+  <path d="M42 99 q-11 11 -6 26 M78 99 q11 11 6 26" fill="none" stroke="#33312e" stroke-width="3.2" stroke-linecap="round"/>
+  <ellipse cx="60" cy="52" rx="27" ry="28" fill="#c9a878" stroke="#33312e" stroke-width="3.4"/>
+  <circle class="mk-ear mk-ear-l" cx="39" cy="33" r="8.5" fill="#b8946a" stroke="#33312e" stroke-width="2.6"/>
+  <circle class="mk-ear mk-ear-r" cx="81" cy="33" r="8.5" fill="#b8946a" stroke="#33312e" stroke-width="2.6"/>
+  <ellipse cx="60" cy="64" rx="11" ry="9" fill="#ecdcc0"/>
+  <ellipse cx="60" cy="61" rx="4.6" ry="3.6" fill="#3a2f28"/>
+  <ellipse cx="48" cy="51" rx="10" ry="9" fill="#6b4f34"/>
+  <ellipse cx="72" cy="51" rx="10" ry="9" fill="#6b4f34"/>
+  <circle cx="48" cy="51" r="5.6" fill="#fff"/>
+  <circle cx="72" cy="51" r="5.6" fill="#fff"/>
+  <circle class="mk-pupil mk-pupil-l" cx="48" cy="51" r="3.1" fill="#111"/>
+  <circle class="mk-pupil mk-pupil-r" cx="72" cy="51" r="3.1" fill="#111"/>
+  <path class="mk-lid mk-lid-l" d="M38 51 h20" stroke="#c9a878" stroke-width="13" stroke-linecap="round"/>
+  <path class="mk-lid mk-lid-r" d="M62 51 h20" stroke="#c9a878" stroke-width="13" stroke-linecap="round"/>
+</svg>`;
+
+const meerkat = {
+  id: "meerkat",
+  name: "미어캣 빼꼼!",
+  tag: "안 볼 때 고개 내밀어 점수!",
+  desc: "미어캣 보초가 <b>딴 데 볼 때</b> 버튼을 꾹 눌러 고개 빼꼼! (누르는 동안 점수 쑥쑥) 🦫<br>돌아보기 직전 <b>귀가 쫑긋(!)</b> 하니 그때 손 떼!<br>보초가 <b>돌아봤을 때</b> 내밀고 있으면 <b>들켜서 왕창 감점!</b> 점수 상위 30% +1!",
+
+  stampOnTimeout: false,
+  duration: () => MK_LEAD + MK_DUR + 3000,
+  hostSetup(ctx) { const seed = Math.floor(Math.random() * 1e9); const startAt = ctx.playStart + MK_LEAD; return { seed, startAt, endAt: startAt + MK_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, ended: false, held: false, lastPeek: false, score: 0, lockUntil: 0, segs: null, curType: "pre", heads: {} };
+    stage.innerHTML = `
+      <div class="mk-wrap" id="mkWrap">
+        <div class="mk-top">
+          <span class="sketch hud-chip">점수 <b id="mkScore">0</b></span>
+          <span class="wa-count" id="mkCount"></span>
+        </div>
+        <div class="mk-guard safe" id="mkGuard">${MEERKAT_SVG}<div class="mk-bang" id="mkBang">!</div></div>
+        <div class="mk-state" id="mkState">준비…</div>
+        <div class="mk-holes" id="mkHoles"></div>
+      </div>`;
+    dock.innerHTML = "";
+    const btn = actionBtn(dock, "고개 빼꼼! (꾹 눌러)");
+    btn.disabled = true; c.btn = btn;
+    c.wrap = stage.querySelector("#mkWrap");
+    c.scoreEl = stage.querySelector("#mkScore");
+    c.countEl = stage.querySelector("#mkCount");
+    c.guardEl = stage.querySelector("#mkGuard");
+    c.stateEl = stage.querySelector("#mkState");
+    const holes = stage.querySelector("#mkHoles");
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const hole = document.createElement("div"); hole.className = "mk-hole";
+      if (pid === ctx.uid) hole.classList.add("me");
+      const head = makeChar({ color: ctx.colorOf(pid), nick: null, size: 40, motion: "none" });
+      head.classList.add("mk-phead");
+      hole.appendChild(head);
+      holes.appendChild(hole);
+      c.heads[pid] = hole;
+    }
+    const down = e => { e.preventDefault(); c.held = true; };
+    const up = e => { e.preventDefault(); c.held = false; };
+    btn.addEventListener("pointerdown", down);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointerleave", up);
+    btn.addEventListener("pointercancel", up);
+    c.stopLoop = gameLoop((t, dt) => this._tick(ctx, dt));
+  },
+
+  _ensureSegs(ctx) {
+    const c = this._c, st = ctx.state();
+    if (c.segs || !st || st.seed === undefined) return;
+    c.segs = mkSchedule(st.seed);
+  },
+
+  _caught(ctx) {
+    const c = this._c;
+    c.score = Math.max(0, c.score - MK_CAUGHT);
+    c.scoreEl.textContent = Math.round(c.score);
+    c.lockUntil = ctx.now() + MK_LOCK;
+    c.lastPeek = false;
+    const h = c.heads[ctx.uid];
+    if (h) { h.classList.remove("peek"); h.classList.add("caught"); setTimeout(() => h.classList.remove("caught"), 700); }
+    c.stateEl.textContent = "들켰다!! 😱";
+    sfx.buzz(); vibrate(250);
+    ctx.writeInput({ peek: 0 });
+  },
+
+  onState() {},
+  onInputs(inputs, ctx) {
+    const c = this._c; if (!c || !inputs) return;
+    for (const [pid, v] of Object.entries(inputs)) {
+      if (pid === ctx.uid) continue;
+      const hole = c.heads[pid];
+      if (hole && v && typeof v.peek === "number") hole.classList.toggle("peek", v.peek === 1);
+    }
+  },
+
+  _tick(ctx, dt) {
+    const c = this._c; if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    this._ensureSegs(ctx);
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; c.btn.disabled = false; gameStartFx(); }
+    if (c.ended || !c.segs) return;
+    const el = t - st.startAt;
+    const type = el >= MK_DUR ? "safe" : mkTypeAt(c.segs, el);
+    const canPeek = c.held && t >= c.lockUntil;
+    if (type !== c.curType) {
+      c.curType = type;
+      c.guardEl.className = "mk-guard " + type;
+      c.wrap.classList.toggle("danger", type === "danger");
+      if (type === "warn") { c.stateEl.textContent = "…돌아본다! (손 떼!)"; if (sfx.heartbeat) sfx.heartbeat(); }
+      else if (type === "danger") {
+        c.stateEl.textContent = "본다!! 👀";
+        if (canPeek) this._caught(ctx);   // 위험 시작 시 내밀고 있으면 들킴
+        if (sfx.thud) sfx.thud();
+      } else if (type === "safe") { c.stateEl.textContent = "지금이야! 빼꼼~ 🦫"; }
+    }
+    // 유효 빼꼼(안전/경고 중 홀드)
+    const effPeek = canPeek && (type === "safe" || type === "warn");
+    if (effPeek) { c.score += MK_RATE * dt * (type === "warn" ? 1.8 : 1); c.scoreEl.textContent = Math.round(c.score); }
+    if (effPeek !== c.lastPeek) {
+      c.lastPeek = effPeek;
+      if (c.heads[ctx.uid]) c.heads[ctx.uid].classList.toggle("peek", effPeek);
+      ctx.writeInput({ peek: effPeek ? 1 : 0 });
+    }
+    const remain = Math.max(0, st.endAt - t);
+    const txt = Math.ceil(remain / 1000) + "초";
+    if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+    if (t >= st.endAt) {
+      c.ended = true; c.btn.disabled = true; c.btn.textContent = "끝!";
+      c.stateEl.textContent = `최종 ${Math.round(c.score)}점`;
+      if (c.heads[ctx.uid]) c.heads[ctx.uid].classList.remove("peek");
+      ctx.writeInput({ score: Math.round(c.score), peek: 0 });
+      sfx.whistle();
+    }
+  },
+
+  hostEarlyEnd(ctx, inputs, state) {
+    if (state && typeof state.startAt === "number" && ctx.now() > state.endAt + 900) return 1500;
+    return false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const played = players.filter(p => inputs[p] && typeof inputs[p].score === "number").sort((a, b) => inputs[b].score - inputs[a].score);
+    return tierOutcome(ctx, played, pid => `${inputs[pid].score}점`, "안 나왔다… 💤", pid => inputs[pid].score);
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
+// 다같이 줄넘기! (점프 타이밍 서바이벌)
+// ═════════════════════════════════════════════
+const JUMP_LEAD = 3000, JUMP_DUR = 30000, JUMP_AIR = 560;
+
+// 줄이 발밑을 지나는 시각들 — 점점 빨라짐 (모두 동일)
+function jumpPasses() {
+  const passes = []; let t = 1500;
+  while (t < JUMP_DUR) { passes.push(t); const prog = t / JUMP_DUR; t += Math.max(560, 1200 - prog * 700); }
+  return passes;
+}
+
+const jumprope = {
+  id: "jump",
+  name: "다같이 줄넘기!",
+  tag: "줄 넘어라! 걸리면 아웃!",
+  desc: "돌아가는 줄이 <b>발밑을 지날 때(빨개짐)</b> 버튼을 눌러 점프! 🦘<br>타이밍 놓쳐 줄에 걸리면 <b>아웃!</b> 줄은 점점 빨라져…<br><b>30초 버티고 살아남으면 +1</b>, 걸리면 -1!",
+
+  stampOnTimeout: false,
+  duration: () => JUMP_LEAD + JUMP_DUR + 3000,
+  hostSetup(ctx) { const startAt = ctx.playStart + JUMP_LEAD; return { startAt, endAt: startAt + JUMP_DUR }; },
+
+  _c: null,
+  mount(stage, dock, ctx) {
+    const c = this._c = { lastCount: -1, started: false, ended: false, out: false, lastJump: -99999, passIdx: 0, passes: jumpPasses(), map: {}, lastWrite: 0 };
+    stage.innerHTML = `
+      <div class="jr-wrap">
+        <div class="jr-top">
+          <span class="sketch hud-chip" id="jrStatus">준비…</span>
+          <span class="wa-count" id="jrCount"></span>
+        </div>
+        <div class="jr-arena" id="jrArena">
+          <svg class="jr-rope" viewBox="0 0 100 60" preserveAspectRatio="none">
+            <path id="jrRopePath" fill="none" stroke="#8e5bd0" stroke-width="2.4" stroke-linecap="round" d="M2 26 Q50 26 98 26"/>
+          </svg>
+          <div class="jr-chars" id="jrChars"></div>
+          <div class="jr-ground"></div>
+        </div>
+      </div>`;
+    dock.innerHTML = "";
+    const btn = actionBtn(dock, "점프! 🦘");
+    btn.disabled = true; c.btn = btn;
+    c.statusEl = stage.querySelector("#jrStatus");
+    c.countEl = stage.querySelector("#jrCount");
+    c.ropePath = stage.querySelector("#jrRopePath");
+    const chars = stage.querySelector("#jrChars");
+    for (const [pid, p] of Object.entries(ctx.players())) {
+      const wrap = document.createElement("div"); wrap.className = "jr-char";
+      const el = makeChar({ color: ctx.colorOf(pid), nick: p.nick, size: 44 });
+      if (pid === ctx.uid) el.classList.add("me");
+      wrap.appendChild(el);
+      chars.appendChild(wrap);
+      c.map[pid] = wrap;
+    }
+    btn.addEventListener("pointerdown", e => { e.preventDefault(); this._jump(ctx); });
+    c.stopLoop = gameLoop(() => this._tick(ctx));
+  },
+
+  _jump(ctx) {
+    const c = this._c;
+    if (!c || !c.started || c.ended || c.out) return;
+    c.lastJump = ctx.now();
+    this._hop(ctx.uid);
+    sfx.pop();
+    const t = ctx.now();
+    if (t - c.lastWrite > 200) { c.lastWrite = t; ctx.writeInput({ j: c.lastJump }); }
+  },
+
+  _hop(pid) {
+    const el = this._c.map[pid]; if (!el) return;
+    el.classList.remove("jr-hop"); void el.offsetWidth; el.classList.add("jr-hop");
+  },
+
+  onState() {},
+  onInputs(inputs, ctx) {
+    const c = this._c; if (!c || !inputs) return;
+    for (const [pid, v] of Object.entries(inputs)) {
+      if (pid === ctx.uid) continue;
+      const el = c.map[pid]; if (!el) continue;
+      if (v && v.out) { el.classList.add("jr-out"); }
+      else if (v && typeof v.j === "number" && v.j !== el._lastj) { el._lastj = v.j; this._hop(pid); }
+    }
+  },
+
+  _tick(ctx) {
+    const c = this._c; if (!c) return;
+    const st = ctx.state();
+    if (!st || typeof st.startAt !== "number") return;
+    const t = ctx.now();
+    if (t < st.startAt) {
+      const n = Math.ceil((st.startAt - t) / 1000);
+      if (n !== c.lastCount) { c.lastCount = n; c.countEl.textContent = n + "…"; cdTick(); }
+      return;
+    }
+    if (!c.started) { c.started = true; c.countEl.textContent = ""; c.btn.disabled = false; c.statusEl.textContent = "점프!"; gameStartFx(); }
+    const el = t - st.startAt;
+    this._renderRope(el);
+    if (!c.out && !c.ended) {
+      while (c.passIdx < c.passes.length && c.passes[c.passIdx] <= el) {
+        const passAbs = st.startAt + c.passes[c.passIdx]; c.passIdx++;
+        const airborne = c.lastJump <= passAbs && passAbs <= c.lastJump + JUMP_AIR;
+        if (!airborne) { this._trip(ctx, el); break; }
+      }
+    }
+    if (!c.ended) {
+      const remain = Math.max(0, st.endAt - t);
+      const txt = Math.ceil(remain / 1000) + "초";
+      if (c.countEl.textContent !== txt) c.countEl.textContent = txt;
+      if (t >= st.endAt) {
+        c.ended = true; c.btn.disabled = true;
+        if (!c.out) { c.statusEl.textContent = "성공! 살아남았다 🎉"; c.btn.textContent = "성공!"; ctx.writeInput({ survived: 1 }); sfx.win(); }
+      }
+    }
+  },
+
+  _trip(ctx, el) {
+    const c = this._c;
+    c.out = true;
+    c.btn.disabled = true; c.btn.textContent = "걸렸다… 💫";
+    c.statusEl.textContent = "줄에 걸렸다! 아웃 😵";
+    if (c.map[ctx.uid]) c.map[ctx.uid].classList.add("jr-out");
+    ctx.writeInput({ out: 1, t: el });
+    sfx.buzz(); vibrate(300);
+  },
+
+  _renderRope(el) {
+    const c = this._c, passes = c.passes;
+    let prev = 0, next = passes[0] || JUMP_DUR;
+    for (let i = 0; i < passes.length; i++) { if (passes[i] <= el) { prev = passes[i]; next = passes[i + 1] || (passes[i] + 600); } }
+    const prog = next > prev ? Math.min(1, Math.max(0, (el - prev) / (next - prev))) : 0;
+    const h = Math.sin(prog * Math.PI); // 0(발밑)…1(머리위)…0(발밑)
+    const ctrlY = 54 - h * 52;          // 54=발밑, 2=머리위
+    c.ropePath.setAttribute("d", `M2 26 Q50 ${ctrlY.toFixed(1)} 98 26`);
+    c.ropePath.setAttribute("stroke", h < 0.25 ? "#e0472f" : "#8e5bd0");
+    c.ropePath.setAttribute("stroke-width", h < 0.25 ? "3.2" : "2.4");
+  },
+
+  hostEarlyEnd(ctx, inputs, state) {
+    if (!state || typeof state.startAt !== "number") return false;
+    if (ctx.now() > state.endAt + 800) return 1500;
+    const players = Object.keys(ctx.players());
+    const allOut = players.length > 0 && players.every(pid => inputs && inputs[pid] && inputs[pid].out);
+    return allOut ? 1400 : false;
+  },
+  evaluate(ctx, inputs) {
+    inputs = inputs || {};
+    const players = Object.keys(ctx.players());
+    const outcome = {}, detail = {};
+    for (const pid of players) {
+      const inp = inputs[pid];
+      if (inp && inp.out) { outcome[pid] = "lose"; detail[pid] = `${Math.round((inp.t || 0) / 1000)}초에 걸림 😵`; }
+      else if (inp) { outcome[pid] = "win"; detail[pid] = "끝까지 생존! 🎉🏅"; }
+      else { outcome[pid] = "lose"; detail[pid] = "구경만… 💤"; }
+    }
+    return { outcome, detail };
+  },
+  unmount() { const c = this._c; if (!c) return; if (c.stopLoop) c.stopLoop(); this._c = null; }
+};
+
+// ═════════════════════════════════════════════
 // 게임 소개 데모 — 진행 방식을 짧은 그림 애니메이션으로 보여줌
 // (게임 소개 오버레이에서 글 설명 대신 사용)
 // ═════════════════════════════════════════════
@@ -5605,5 +6188,45 @@ combo.demo = () => {
   return d;
 };
 
-export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn", "slot", "stock", "combo"];
-export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn, slot, stock, combo };
+land.demo = () => {
+  const d = dmStage("dm-land");
+  const grid = dmAt(dmProp("dm-ld-grid"), "50%", "16%");
+  const cols = ["#e64a3c", "#45a3e5", "", "#45a3e5", "#f5a623", "", "#e64a3c", "#e64a3c", "#58b647", "", "", "#45a3e5"];
+  for (let i = 0; i < 12; i++) { const cell = dmProp("dm-ld-cell"); if (cols[i]) cell.style.background = cols[i]; grid.appendChild(cell); }
+  d.appendChild(grid);
+  d.appendChild(dmAt(dmProp("dm-ld-hand", "👆"), "44%", "48%"));
+  d.appendChild(dmAt(dmProp("dm-ld-hint", "탭해서 내 색으로! 뺏고 뺏겨!"), "50%", "86%"));
+  return d;
+};
+
+shake.demo = () => {
+  const d = dmStage("dm-shake");
+  d.appendChild(dmAt(dmChar(1, "dm-sh-phone", 54), "50%", "30%"));
+  d.appendChild(dmAt(dmProp("dm-sh-w1", "💨"), "26%", "24%"));
+  d.appendChild(dmAt(dmProp("dm-sh-w2", "💨"), "70%", "24%"));
+  d.appendChild(dmAt(dmProp("dm-sh-hint", "폰을 미친 듯이 흔들어!!"), "50%", "84%"));
+  return d;
+};
+
+meerkat.demo = () => {
+  const d = dmStage("dm-mk");
+  const g = dmAt(dmProp("dm-mk-guard"), "50%", "8%");
+  g.innerHTML = MEERKAT_SVG;
+  d.appendChild(g);
+  d.appendChild(dmAt(dmProp("dm-mk-head"), "50%", "60%"));
+  d.appendChild(dmAt(dmProp("dm-mk-hint", "안 볼 때 빼꼼! 돌아보면 숨어!"), "50%", "86%"));
+  return d;
+};
+
+jumprope.demo = () => {
+  const d = dmStage("dm-jr");
+  const rope = dmAt(dmProp("dm-jr-rope"), "50%", "20%");
+  rope.innerHTML = `<svg viewBox="0 0 100 40" preserveAspectRatio="none"><path class="dm-jr-line" fill="none" stroke="#8e5bd0" stroke-width="3" stroke-linecap="round" d="M4 20 Q50 20 96 20"/></svg>`;
+  d.appendChild(rope);
+  d.appendChild(dmAt(dmChar(3, "dm-jr-char", 46), "50%", "46%"));
+  d.appendChild(dmAt(dmProp("dm-jr-hint", "줄 지날 때 점프! 30초 버텨!"), "50%", "86%"));
+  return d;
+};
+
+export const GAME_IDS = ["nunchi", "mugunghwa", "grab", "choseki", "whack", "mash", "block", "tug", "wake", "avg", "boss", "spin", "voice", "omr", "balloon", "bolt", "bomb", "rps", "vote", "math", "quiz", "syncbtn", "slot", "stock", "combo", "land", "shake", "meerkat", "jump"];
+export const GAMES = { nunchi, mugunghwa, grab, choseki, whack, mash, block, tug, wake, avg, boss, spin, voice, omr, balloon, bolt, bomb, rps, vote, math, quiz, syncbtn, slot, stock, combo, land, shake, meerkat, jump: jumprope };

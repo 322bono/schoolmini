@@ -944,7 +944,7 @@ const GAME_SHORT = {
   tug: "줄다리기", wake: "깨우기", avg: "눈치숫자", boss: "막타", spin: "팽이",
   voice: "성대모사", omr: "찍기", balloon: "풍선", bolt: "번개",
   bomb: "폭탄", rps: "가위바위보", vote: "동상이몽", math: "암산", quiz: "퀴즈", syncbtn: "눈치버튼", slot: "슬롯",
-  stock: "주식", combo: "콤보"
+  stock: "주식", combo: "콤보", land: "땅따먹기", shake: "흔들기", meerkat: "미어캣", jump: "줄넘기"
 };
 
 // 최종 리더보드 — 내용은 데이터가 바뀔 때마다 다시 그림 (첫 렌더 시점에 점수 동기화가
@@ -1400,6 +1400,11 @@ function botIds() { return Object.keys(playersCache).filter(id => id.startsWith(
 let botLastMove = 0;
 const slotBotNext = {}; // 슬롯머신 봇별 다음 스핀 시각
 const comboBotNext = {}; // 콤보 봇별 다음 탭 시각
+const landBotNext = {};  // 땅따먹기 봇별 다음 탭 시각
+const shakeBotNext = {}; // 흔들기 봇별 다음 흔들 시각
+const mkBotNext = {};    // 미어캣 봇별 다음 점수 시각
+const jumpBotNext = {};  // 줄넘기 봇별 다음 점프 시각
+const jumpBotFate = {};  // 줄넘기 봇별 생존/탈락 운명(경과ms)
 function botDrive() {
   if (!isHost || !room || !meta || meta.phase !== "play") return;
   const nowMs = Date.now();
@@ -1568,6 +1573,49 @@ function botDrive() {
           const gain = 1 + Math.floor(Math.random() * 4);
           const best = Math.max((inp && inp.best) || 0, gain);
           net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { score: cur + gain, best });
+        }
+      }
+    } else if (g === "land") {
+      // 봇: 랜덤 타일을 주기적으로 점령
+      if (state && state.startAt && t > state.startAt && t < state.endAt) {
+        if (t >= (landBotNext[pid] || 0)) {
+          landBotNext[pid] = t + 220 + Math.random() * 340;
+          const i = Math.floor(Math.random() * 20);
+          net.dbUpdate(`rooms/${room}/game/state`, { ["tiles/" + i]: pid });
+        }
+      }
+    } else if (g === "shake") {
+      // 봇: 주기적으로 흔들기 카운트 누적
+      if (state && state.startAt && t > state.startAt && t < state.endAt) {
+        if (t >= (shakeBotNext[pid] || 0)) {
+          shakeBotNext[pid] = t + 120 + Math.random() * 200;
+          const cur = (inp && inp.n) || 0;
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { n: cur + 1 + Math.floor(Math.random() * 3) });
+        }
+      }
+    } else if (g === "meerkat") {
+      // 봇: 안전할 때 빼꼼해 점수 누적, 가끔 들킴
+      if (state && state.startAt && t > state.startAt && t < state.endAt) {
+        if (t >= (mkBotNext[pid] || 0)) {
+          mkBotNext[pid] = t + 700 + Math.random() * 700;
+          const cur = (inp && inp.score) || 0;
+          const caught = Math.random() < 0.18;
+          const next = caught ? Math.max(0, cur - 45) : cur + 8 + Math.floor(Math.random() * 12);
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { score: next });
+        }
+      }
+    } else if (g === "jump") {
+      // 봇: 점프 신호 브로드캐스트, 정해진 운명 시각에 탈락(일부는 끝까지 생존)
+      if (state && state.startAt && t > state.startAt && !(inp && inp.out)) {
+        const el = t - state.startAt;
+        if (jumpBotFate[pid] === undefined) jumpBotFate[pid] = Math.random() < 0.45 ? 6000 + Math.random() * 20000 : Infinity;
+        if (t >= state.endAt) {
+          if (!(inp && inp.survived)) net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { survived: 1 });
+        } else if (el >= jumpBotFate[pid]) {
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { out: 1, t: el });
+        } else if (t >= (jumpBotNext[pid] || 0)) {
+          jumpBotNext[pid] = t + 500 + Math.random() * 400;
+          net.dbUpdate(`rooms/${room}/game/inputs/${pid}`, { j: t });
         }
       }
     } else if (g === "mugunghwa") {

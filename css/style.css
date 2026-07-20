@@ -1626,6 +1626,88 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 @keyframes dmCbTap { 0%,40%,100% { transform: scale(1); } 50% { transform: scale(0.8); } }
 .dm-cb-hint { font-size: 0.9rem; color: var(--ink-soft); }
 
+/* ── 땅따먹기 전쟁! ───────────────────────── */
+.land-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; min-height: 0; padding-top: 0.4rem; }
+.land-top { display: flex; gap: 0.9rem; align-items: center; }
+.land-grid { display: grid; gap: 6px; width: min(94%, 460px); flex: 1; max-height: 62vh; }
+.land-tile {
+  border: 3px solid var(--ink); border-radius: 12px; background: var(--paper-2);
+  cursor: pointer; touch-action: manipulation; transition: background 0.08s; min-height: 44px;
+  box-shadow: inset 0 -3px 0 rgba(0,0,0,0.08);
+}
+.land-tile.mine { box-shadow: inset 0 0 0 3px var(--hl), inset 0 -3px 0 rgba(0,0,0,0.12); }
+.land-tile.land-pop { animation: landPop 0.18s ease-out; }
+@keyframes landPop { 0% { transform: scale(0.82); } 100% { transform: scale(1); } }
+
+/* ── 흔들기! ─────────────────────────────── */
+.shake-top { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; min-height: 3.2em; }
+.shake-num { font-size: clamp(2rem, 10vw, 3.2rem); font-weight: 700; color: var(--red); min-height: 1.1em; }
+.shake-my { font-size: 1.15rem; padding: 0.1em 0.7em; }
+.shake-go { animation: shakeGo 0.18s; }
+@keyframes shakeGo { 0%,100% { transform: translateX(0) rotate(0); } 25% { transform: translateX(-4px) rotate(-8deg); } 75% { transform: translateX(4px) rotate(8deg); } }
+
+/* ── 미어캣 빼꼼! ─────────────────────────── */
+.mk-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-height: 0; padding-top: 0.4rem; position: relative; }
+.mk-wrap.danger::after { content: ""; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 6px rgba(224,71,47,0.55); border-radius: 12px; animation: mkDangerFlash 0.3s; }
+@keyframes mkDangerFlash { from { box-shadow: inset 0 0 0 20px rgba(224,71,47,0.75); } to { box-shadow: inset 0 0 0 6px rgba(224,71,47,0.4); } }
+.mk-top { display: flex; gap: 0.9rem; align-items: center; }
+.mk-guard { position: relative; width: 130px; height: 150px; transition: transform 0.18s; }
+.mk-svg { width: 100%; height: 100%; }
+.mk-lid { opacity: 0; transition: opacity 0.12s; }
+.mk-guard.safe .mk-lid { opacity: 1; }
+.mk-guard.safe .mk-pupil { transform: translate(-3px, 2px); }
+.mk-pupil { transition: transform 0.14s; transform-box: fill-box; transform-origin: center; }
+.mk-guard.danger { animation: mkTurn 0.32s; }
+.mk-guard.danger .mk-pupil { transform: translate(0, 0); }
+@keyframes mkTurn { 0% { transform: rotate(-7deg) scale(1.02); } 50% { transform: rotate(7deg) scale(1.08); } 100% { transform: rotate(0) scale(1.05); } }
+.mk-guard.warn .mk-ear { animation: mkEar 0.2s infinite alternate; }
+@keyframes mkEar { to { transform: translateY(-3px); } }
+.mk-bang { position: absolute; top: 2px; right: 8px; font-size: 2rem; font-weight: 700; color: var(--red); opacity: 0; }
+.mk-guard.warn .mk-bang { opacity: 1; animation: mkBang 0.3s infinite alternate; }
+@keyframes mkBang { to { transform: scale(1.3) rotate(8deg); } }
+.mk-state { font-size: clamp(1.2rem, 5.5vw, 1.7rem); font-weight: 700; min-height: 1.3em; text-align: center; }
+.mk-holes { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; }
+.mk-hole {
+  width: 52px; height: 40px; border-radius: 50% 50% 46% 46%; background: #4a3b2a;
+  border: 3px solid var(--ink); overflow: hidden; position: relative; box-shadow: inset 0 6px 6px rgba(0,0,0,0.35);
+}
+.mk-hole.me { box-shadow: inset 0 6px 6px rgba(0,0,0,0.35), 0 0 0 3px var(--hl); }
+.mk-phead { position: absolute; left: 50%; bottom: -34px; transform: translateX(-50%); transition: bottom 0.14s cubic-bezier(0.3,1.5,0.5,1); }
+.mk-hole.peek .mk-phead { bottom: 2px; }
+.mk-hole.caught { animation: mkCaught 0.4s; }
+@keyframes mkCaught { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+
+/* ── 다같이 줄넘기! ───────────────────────── */
+.jr-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-height: 0; padding-top: 0.4rem; }
+.jr-top { display: flex; gap: 0.9rem; align-items: center; }
+.jr-arena { position: relative; width: min(96%, 560px); flex: 1; min-height: 220px; }
+.jr-rope { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: visible; }
+.jr-ground { position: absolute; left: 0; right: 0; bottom: 26%; border-bottom: 3px dashed rgba(51,49,46,0.3); }
+.jr-chars { position: absolute; left: 0; right: 0; bottom: 26%; display: flex; justify-content: center; align-items: flex-end; gap: 0.4rem; z-index: 2; }
+.jr-char { transition: transform 0.06s; }
+.jr-char.jr-hop { animation: jrHop 0.56s ease-out; }
+@keyframes jrHop { 0% { transform: translateY(0); } 40% { transform: translateY(-46px); } 100% { transform: translateY(0); } }
+.jr-char.jr-out { filter: grayscale(0.7); opacity: 0.6; transform: translateY(6px) rotate(-8deg); }
+
+/* 데모: 땅따먹기 / 흔들기 / 미어캣 / 줄넘기 */
+.dm-ld-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 60%; }
+.dm-ld-cell { aspect-ratio: 1; border: 2px solid var(--ink); border-radius: 4px; background: var(--paper-2); }
+.dm-ld-hand { font-size: 1.5rem; animation: dmCbTap 1.1s ease infinite; }
+.dm-ld-hint, .dm-sh-hint, .dm-mk-hint, .dm-jr-hint { font-size: 0.9rem; color: var(--ink-soft); }
+.dm-sh-phone { animation: shakeGo 0.24s infinite; }
+.dm-sh-w1, .dm-sh-w2 { font-size: 1.4rem; animation: dmFade 0.6s infinite alternate; }
+@keyframes dmFade { to { opacity: 0.3; } }
+.dm-mk-guard { width: 66px; height: 82px; }
+.dm-mk-guard .mk-svg { width: 100%; height: 100%; }
+.dm-mk-head { width: 26px; height: 26px; border-radius: 50%; background: #45a3e5; border: 2px solid var(--ink); animation: dmMkPeek 1.8s ease-in-out infinite; }
+@keyframes dmMkPeek { 0%,40% { transform: translateY(14px); } 55%,75% { transform: translateY(-4px); } 90%,100% { transform: translateY(14px); } }
+.dm-jr-rope { width: 72%; height: 30%; }
+.dm-jr-rope svg { width: 100%; height: 100%; overflow: visible; }
+.dm-jr-line { animation: dmJrRope 1.4s ease-in-out infinite; }
+@keyframes dmJrRope { 0%,100% { d: path("M4 20 Q50 4 96 20"); } 50% { d: path("M4 20 Q50 40 96 20"); } }
+.dm-jr-char { animation: dmJrHop 1.4s ease-in-out infinite; }
+@keyframes dmJrHop { 0%,35%,100% { transform: translateY(0); } 55% { transform: translateY(-16px); } }
+
 /* ── 눈치 버튼! ───────────────────────────── */
 .sync-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1rem; min-height: 0; padding-top: 0.4rem; }
 .sync-top { display: flex; gap: 0.9rem; align-items: center; }
