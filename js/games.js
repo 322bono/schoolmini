@@ -2415,6 +2415,8 @@ function computeVoiceScores(ref, rec) {
   return { p, i, r, l, total: p + i + r + l };
 }
 
+let lastVoicePerf = null; // 직전 성대모사 주인공 — 연속으로 같은 사람이 걸리지 않게
+
 const voice = {
   id: "voice",
   name: "성대모사!",
@@ -2429,11 +2431,19 @@ const voice = {
     // 오프라인인 사람이 주인공이면 라운드 전체가 죽은 시간 — 접속 중인 사람 우선
     const online = humans.filter(id => players[id].online !== false);
     const base = online.length ? online : humans;
-    // 입장할 때 마이크 권한을 허용한 사람 우선 — 성대모사는 무조건 되는 사람이 걸려야 함
-    const micReady = base.filter(id => players[id].micok);
-    const pool = micReady.length ? micReady : (base.length ? base : Object.keys(players));
+    // ① 직전 주인공은 제외해서 돌아가며 걸리게 (다른 사람이 있을 때만)
+    let cand = base;
+    if (base.length > 1 && lastVoicePerf && base.includes(lastVoicePerf)) {
+      cand = base.filter(id => id !== lastVoicePerf);
+    }
+    // ② 마이크 허용자를 "우선"하되 하드락하지 않음 — 혼자만 허용했다고 매번 걸리지 않도록.
+    //    후보 중 허용자가 있으면 그 중에서, 없으면 후보 전원(선택 시 마이크 권한 요청).
+    const micReady = cand.filter(id => players[id].micok);
+    const pool = micReady.length ? micReady : (cand.length ? cand : (base.length ? base : Object.keys(players)));
+    const perf = pool[Math.floor(Math.random() * pool.length)];
+    lastVoicePerf = perf;
     return {
-      perf: pool[Math.floor(Math.random() * pool.length)],
+      perf,
       clip: Math.floor(Math.random() * VOICE_CLIPS.length),
       sub: "roulette",
       subAt: ctx.playStart
@@ -5420,7 +5430,7 @@ const shake = {
   id: "shake",
   name: "흔들기!",
   tag: "폰을 미친 듯이 흔들어!!",
-  desc: "카운트다운 끝나면 <b>10초</b> 동안 폰을 미친 듯이 흔들어!! 📱💨<br>(안 흔들리는 기기는 버튼 마구 탭!) 가장 많이 흔든 <b>상위 30% +1</b> · 중간 <b>0</b> · 나머지 <b>-1</b>!",
+  desc: "카운트다운 끝나면 <b>10초</b> 동안 폰을 미친 듯이 흔들어!! 📱💨<br>(탭 아님! 진짜로 흔들어야 올라감) 가장 많이 흔든 <b>상위 30% +1</b> · 중간 <b>0</b> · 나머지 <b>-1</b>!",
 
   stampOnTimeout: false,
   duration: () => SHAKE_LEAD + SHAKE_DUR + 2500,
@@ -5461,8 +5471,7 @@ const shake = {
     this._armMotion(false);
     btn.addEventListener("pointerdown", e => {
       e.preventDefault();
-      this._armMotion(true);
-      if (c.started && !c.ended) this._add(ctx);
+      this._armMotion(true); // iOS 센서 권한 요청(사용자 제스처) — 탭으로는 점수 안 올라감
     });
     c.stopLoop = gameLoop(() => this._tick(ctx));
   },
@@ -5519,7 +5528,7 @@ const shake = {
     }
     if (!c.started) {
       c.started = true; c.numEl.textContent = "흔들어!!!"; c.myEl.style.display = "";
-      c.btn.textContent = "🤳 흔들어!! (탭도 OK)";
+      c.btn.textContent = "🤳 마구 흔들어!!";
       gameStartFx();
       setTimeout(() => { if (c.numEl) c.numEl.textContent = ""; }, 1100);
     }
@@ -5728,12 +5737,12 @@ const meerkat = {
 // ═════════════════════════════════════════════
 // 다같이 줄넘기! (점프 타이밍 서바이벌)
 // ═════════════════════════════════════════════
-const JUMP_LEAD = 3000, JUMP_DUR = 30000, JUMP_AIR = 560;
+const JUMP_LEAD = 3000, JUMP_DUR = 30000, JUMP_AIR = 640;
 
-// 줄이 발밑을 지나는 시각들 — 점점 빨라짐 (모두 동일)
+// 줄이 발밑을 지나는 시각들 — 점점 빨라짐 (모두 동일). 초반은 느긋하게 시작해 리듬을 익히게
 function jumpPasses() {
-  const passes = []; let t = 1500;
-  while (t < JUMP_DUR) { passes.push(t); const prog = t / JUMP_DUR; t += Math.max(560, 1200 - prog * 700); }
+  const passes = []; let t = 2000;
+  while (t < JUMP_DUR) { passes.push(t); const prog = t / JUMP_DUR; t += Math.max(660, 1420 - prog * 760); }
   return passes;
 }
 
@@ -5853,13 +5862,17 @@ const jumprope = {
   _renderRope(el) {
     const c = this._c, passes = c.passes;
     let prev = 0, next = passes[0] || JUMP_DUR;
-    for (let i = 0; i < passes.length; i++) { if (passes[i] <= el) { prev = passes[i]; next = passes[i + 1] || (passes[i] + 600); } }
+    for (let i = 0; i < passes.length; i++) { if (passes[i] <= el) { prev = passes[i]; next = passes[i + 1] || (passes[i] + 700); } }
     const prog = next > prev ? Math.min(1, Math.max(0, (el - prev) / (next - prev))) : 0;
-    const h = Math.sin(prog * Math.PI); // 0(발밑)…1(머리위)…0(발밑)
-    const ctrlY = 54 - h * 52;          // 54=발밑, 2=머리위
-    c.ropePath.setAttribute("d", `M2 26 Q50 ${ctrlY.toFixed(1)} 98 26`);
-    c.ropePath.setAttribute("stroke", h < 0.25 ? "#e0472f" : "#8e5bd0");
-    c.ropePath.setAttribute("stroke-width", h < 0.25 ? "3.2" : "2.4");
+    const h = Math.sin(prog * Math.PI);         // 0=발밑(통과 순간) … 1=머리위(사이)
+    // SVG y: 45=캐릭터 발밑(줄이 정확히 발에 닿음), 8=머리 위. 통과 시각에 발밑에 오도록.
+    const centerY = 45 - h * 37;
+    const bow = 5;                               // 살짝 처진 줄 느낌
+    c.ropePath.setAttribute("d", `M3 ${(centerY - 3).toFixed(1)} Q50 ${(centerY + bow).toFixed(1)} 97 ${(centerY - 3).toFixed(1)}`);
+    // 발밑에 접근(하강)할 때 미리 빨개져서 점프 타이밍을 알려줌
+    const near = h < 0.42;
+    c.ropePath.setAttribute("stroke", near ? "#e0472f" : "#8e5bd0");
+    c.ropePath.setAttribute("stroke-width", near ? "3.6" : "2.4");
   },
 
   hostEarlyEnd(ctx, inputs, state) {

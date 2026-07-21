@@ -1680,13 +1680,13 @@ button { cursor: pointer; touch-action: manipulation; user-select: none; -webkit
 /* ── 다같이 줄넘기! ───────────────────────── */
 .jr-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.5rem; min-height: 0; padding-top: 0.4rem; }
 .jr-top { display: flex; gap: 0.9rem; align-items: center; }
-.jr-arena { position: relative; width: min(96%, 560px); flex: 1; min-height: 220px; }
+.jr-arena { position: relative; width: min(96%, 560px); flex: 1; min-height: 300px; }
 .jr-rope { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; overflow: visible; }
-.jr-ground { position: absolute; left: 0; right: 0; bottom: 26%; border-bottom: 3px dashed rgba(51,49,46,0.3); }
-.jr-chars { position: absolute; left: 0; right: 0; bottom: 26%; display: flex; justify-content: center; align-items: flex-end; gap: 0.4rem; z-index: 2; }
-.jr-char { transition: transform 0.06s; }
-.jr-char.jr-hop { animation: jrHop 0.56s ease-out; }
-@keyframes jrHop { 0% { transform: translateY(0); } 40% { transform: translateY(-46px); } 100% { transform: translateY(0); } }
+.jr-ground { position: absolute; left: 0; right: 0; bottom: 25%; border-bottom: 3px dashed rgba(51,49,46,0.3); }
+.jr-chars { position: absolute; left: 0; right: 0; bottom: 25%; display: flex; justify-content: center; align-items: flex-end; gap: 0.4rem; z-index: 2; }
+.jr-char { transition: transform 0.05s; }
+.jr-char.jr-hop { animation: jrHop 0.64s ease-out; }
+@keyframes jrHop { 0% { transform: translateY(0); } 42% { transform: translateY(-54px); } 100% { transform: translateY(0); } }
 .jr-char.jr-out { filter: grayscale(0.7); opacity: 0.6; transform: translateY(6px) rotate(-8deg); }
 
 /* 데모: 땅따먹기 / 흔들기 / 미어캣 / 줄넘기 */
